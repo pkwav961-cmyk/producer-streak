@@ -1,0 +1,185 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isVerified() {
+      // Allowing anonymous/unverified users because the app explicitly supports Guest mode
+      // but we still check for presence of auth.
+      return isSignedIn();
+    }
+
+    // --- Entities Validation ---
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['displayName', 'email', 'xp', 'level', 'streakCount', 'createdAt']) &&
+             data.displayName is string && data.displayName.size() <= 50 &&
+             data.email is string && data.email.size() <= 100 &&
+             data.xp is number && data.level is number &&
+             data.streakCount is number &&
+             data.createdAt is string; // Using ISO strings as per blueprint
+    }
+
+    function isValidSession(data) {
+      return data.keys().hasAll(['userId', 'startTime', 'type', 'status']) &&
+             data.userId == request.auth.uid &&
+             data.userId is string &&
+             data.startTime is string &&
+             data.type in ['production', 'mixing', 'recording', 'arrangement'] &&
+             data.status in ['partial', 'completed'] &&
+             (data.get('durationMinutes', 0) is number);
+    }
+
+    function isValidGoal(data) {
+      return data.keys().hasAll(['userId', 'title', 'targetValue', 'metric']) &&
+             data.userId == request.auth.uid &&
+             data.title is string && data.title.size() <= 100 &&
+             data.targetValue is number &&
+             data.metric is string;
+    }
+
+    function isValidBeat(data) {
+       return data.keys().hasAll(['userId', 'title', 'status', 'createdAt']) &&
+              data.userId == request.auth.uid &&
+              data.title is string &&
+              data.status is string &&
+              data.createdAt is string;
+    }
+
+    function isValidFriendship(data) {
+      return data.keys().hasAll(['users', 'status', 'createdAt']) &&
+             data.users is list && data.users.size() == 2 &&
+             request.auth.uid in data.users &&
+             data.status in ['pending', 'accepted', 'declined'];
+    }
+
+    function isValidChat(data) {
+      return data.keys().hasAll(['participants', 'updatedAt', 'type']) &&
+             data.participants is list && data.participants.size() >= 2 &&
+             request.auth.uid in data.participants;
+    }
+
+    function isValidMessage(data) {
+      return data.keys().hasAll(['senderId', 'text', 'createdAt']) &&
+             data.senderId == request.auth.uid &&
+             data.text is string && data.text.size() <= 5000;
+    }
+
+    // --- Collection Matches ---
+
+    match /users/{userId} {
+      allow get: if isSignedIn(); 
+      allow list: if isSignedIn();
+      allow create: if isOwner(userId) && isValidUser(incoming());
+      allow update: if isOwner(userId) && (
+        // Action: Update profile info
+        incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoURL', 'bio', 'location']) ||
+        // Action: System updates stats (xp, streak, etc)
+        // In a real app we'd split this to server-side, but for this applet we allow owner to update their own stats
+        incoming().diff(existing()).affectedKeys().hasAny(['xp', 'level', 'streakCount', 'lastActivityDate', 'streakShields', 'stats'])
+      );
+    }
+
+    match /sessions/{sessionId} {
+      allow get: if isOwner(existing().userId);
+      allow list: if isOwner(resource.data.userId); // Pillar 8: Secure list queries
+      allow create: if isVerified() && isValidSession(incoming());
+      allow update: if isOwner(existing().userId) && isValidSession(incoming()) && (
+        incoming().diff(existing()).affectedKeys().hasOnly(['endTime', 'durationMinutes', 'notes', 'status', 'updatedAt'])
+      );
+      allow delete: if isOwner(existing().userId);
+    }
+
+    match /goals/{goalId} {
+      allow get: if isOwner(existing().userId);
+      allow list: if isOwner(resource.data.userId);
+      allow create: if isVerified() && isValidGoal(incoming());
+      allow update: if isOwner(existing().userId) && (
+        incoming().diff(existing()).affectedKeys().hasOnly(['currentValue', 'completed', 'deadline'])
+      );
+      allow delete: if isOwner(existing().userId);
+    }
+
+    match /beats/{beatId} {
+      allow get: if isSignedIn(); 
+      allow list: if isSignedIn();
+      allow create: if isVerified() && isValidBeat(incoming());
+      allow update: if isOwner(existing().userId) && (
+        incoming().diff(existing()).affectedKeys().hasOnly(['title', 'genre', 'status'])
+      );
+      allow delete: if isOwner(existing().userId);
+    }
+
+    match /friendships/{friendId} {
+      allow get, list: if isSignedIn() && request.auth.uid in resource.data.users;
+      allow create: if isVerified() && isValidFriendship(incoming());
+      allow update: if isSignedIn() && request.auth.uid in existing().users && (
+        incoming().diff(existing()).affectedKeys().hasOnly(['status'])
+      );
+      allow delete: if isSignedIn() && request.auth.uid in existing().users;
+    }
+
+    match /chats/{chatId} {
+      allow get, list: if isSignedIn() && request.auth.uid in resource.data.participants;
+      allow create: if isVerified() && isValidChat(incoming());
+      allow update: if isSignedIn() && request.auth.uid in existing().participants && (
+        incoming().diff(existing()).affectedKeys().hasOnly(['lastMessage', 'updatedAt', 'name'])
+      );
+
+      match /messages/{messageId} {
+        // Pillar 1: Relational Sync - access to message depends on chat membership
+        allow read, write: if isSignedIn() && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants;
+      }
+    }
+
+    match /challenges/{challengeId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
+      allow write: if false; // Only admin or system (not implemented in client)
+    }
+
+    match /userChallenges/{ucId} {
+      allow get: if isOwner(existing().userId);
+      allow list: if isOwner(resource.data.userId);
+      allow create: if isVerified() && incoming().userId == request.auth.uid;
+      allow update: if isOwner(existing().userId) && (
+        incoming().diff(existing()).affectedKeys().hasOnly(['currentValue', 'completed', 'claimed', 'updatedAt'])
+      );
+    }
+
+    match /follows/{followId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
+      allow create: if isVerified() && incoming().followerId == request.auth.uid;
+      allow delete: if isOwner(existing().followerId);
+    }
+
+    match /waitingList/{id} {
+      allow create: if incoming().keys().hasAll(['email']) && incoming().email is string;
+    }
+  }
+}

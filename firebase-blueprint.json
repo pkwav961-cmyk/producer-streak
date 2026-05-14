@@ -1,0 +1,193 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile and statistics",
+      "type": "object",
+      "properties": {
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "email": { "type": "string" },
+        "xp": { "type": "number" },
+        "level": { "type": "number" },
+        "streakCount": { "type": "number" },
+        "lastActivityDate": { "type": "string" },
+        "streakShields": { "type": "number" },
+        "stats": { "type": "object" },
+        "bio": { "type": "string" },
+        "location": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["displayName", "email", "xp", "level", "streakCount", "createdAt"]
+    },
+    "Session": {
+      "title": "Session",
+      "description": "A production session",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "startTime": { "type": "string" },
+        "endTime": { "type": "string" },
+        "durationMinutes": { "type": "number" },
+        "type": { "type": "string" },
+        "verified": { "type": "boolean" },
+        "notes": { "type": "string" },
+        "status": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["userId", "startTime", "type", "status"]
+    },
+    "Goal": {
+      "title": "Goal",
+      "description": "User personal goals",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "targetValue": { "type": "number" },
+        "currentValue": { "type": "number" },
+        "metric": { "type": "string" },
+        "period": { "type": "string" },
+        "completed": { "type": "boolean" },
+        "deadline": { "type": "string" }
+      },
+      "required": ["userId", "title", "targetValue", "metric"]
+    },
+    "Beat": {
+      "title": "Beat",
+      "description": "A finished beat",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "status": { "type": "string" },
+        "genre": { "type": "string" },
+        "audioUrl": { "type": "string" },
+        "fileName": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "verified": { "type": "boolean" }
+      },
+      "required": ["userId", "title", "status", "createdAt"]
+    },
+    "Chat": {
+      "title": "Chat",
+      "description": "A conversation between users",
+      "type": "object",
+      "properties": {
+        "participants": { "type": "array" },
+        "lastMessage": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "type": { "type": "string" },
+        "name": { "type": "string" }
+      },
+      "required": ["participants", "updatedAt", "type"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "A message in a chat",
+      "type": "object",
+      "properties": {
+        "senderId": { "type": "string" },
+        "text": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["senderId", "text", "createdAt"]
+    },
+    "Friendship": {
+      "title": "Friendship",
+      "description": "Connection between two users",
+      "type": "object",
+      "properties": {
+        "users": { "type": "array" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "requestedBy": { "type": "string" }
+      },
+      "required": ["users", "status", "createdAt"]
+    },
+    "Challenge": {
+      "title": "Challenge",
+      "description": "Community or individual challenge",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "type": { "type": "string" },
+        "rewardXP": { "type": "number" },
+        "targetValue": { "type": "number" },
+        "currentGlobalValue": { "type": "number" },
+        "participantsCount": { "type": "number" },
+        "expiresAt": { "type": "string" },
+        "iconName": { "type": "string" }
+      },
+      "required": ["title", "type", "targetValue", "expiresAt"]
+    },
+    "UserChallenge": {
+      "title": "UserChallenge",
+      "description": "User progress on a specific challenge",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "challengeId": { "type": "string" },
+        "currentValue": { "type": "number" },
+        "completed": { "type": "boolean" },
+        "claimed": { "type": "boolean" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["userId", "challengeId", "currentValue", "completed", "claimed"]
+    },
+    "Follow": {
+      "title": "Follow",
+      "description": "Follow relationship between two users",
+      "type": "object",
+      "properties": {
+        "followerId": { "type": "string" },
+        "followingId": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["followerId", "followingId", "createdAt"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": "User",
+      "description": "Store individual user profile and stats"
+    },
+    "sessions/{sessionId}": {
+      "schema": "Session",
+      "description": "Studio sessions logged by users"
+    },
+    "goals/{goalId}": {
+      "schema": "Goal",
+      "description": "Personal missions set by producers"
+    },
+    "beats/{beatId}": {
+      "schema": "Beat",
+      "description": "Beats finished by producers"
+    },
+    "chats/{chatId}": {
+      "schema": "Chat",
+      "description": "Conversations between users"
+    },
+    "chats/{chatId}/messages/{messageId}": {
+      "schema": "Message",
+      "description": "Messages within a chat"
+    },
+    "friendships/{friendshipId}": {
+      "schema": "Friendship",
+      "description": "Links between friends"
+    },
+    "challenges/{challengeId}": {
+      "schema": "Challenge",
+      "description": "Global and individual challenges"
+    },
+    "userChallenges/{userChallengeId}": {
+      "schema": "UserChallenge",
+      "description": "Tracking individual users progress on challenges"
+    },
+    "follows/{followId}": {
+      "schema": "Follow",
+      "description": "Follower relationships"
+    }
+  }
+}

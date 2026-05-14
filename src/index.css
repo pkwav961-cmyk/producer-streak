@@ -1,0 +1,38 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", "Outfit", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Space Mono", monospace;
+  
+  --color-primary: #7D3AF2;
+  --color-secondary: #E14182;
+  --color-accent: #F57B3F;
+  --color-surface: #050505;
+  --color-card: #121214;
+}
+
+@layer base {
+  body {
+    @apply bg-surface text-white antialiased selection:bg-primary/30 font-sans;
+  }
+}
+
+.glass {
+  @apply bg-white/5 backdrop-blur-xl border border-white/5;
+}
+
+.glow-purple {
+  @apply shadow-[0_0_50px_rgba(125,58,242,0.15)];
+}
+
+.glow-orange {
+  @apply shadow-[0_0_50px_rgba(245,123,63,0.15)];
+}
+
+.gradient-text {
+  @apply bg-gradient-to-r from-[#7D3AF2] via-[#E14182] to-[#F57B3F] bg-clip-text text-transparent;
+}
+
+.gradient-bg {
+  @apply bg-gradient-to-r from-[#7D3AF2] to-[#F57B3F];
+}
