@@ -882,6 +882,67 @@ export const VerifiedProfile: React.FC = () => {
     }
   };
 
+  const handleListenClick = async (credit: any, platform: 'spotify' | 'appleMusic') => {
+    const existingUrl = credit[platform === 'spotify' ? 'spotifyUrl' : 'appleMusicUrl'];
+    if (existingUrl && !existingUrl.includes('/search') && !existingUrl.includes('?term=')) {
+      window.open(existingUrl, '_blank');
+      return;
+    }
+
+    const term = `${credit.artist} - ${credit.title}`;
+    try {
+      let searchUrl = credit.appleMusicUrl || credit.spotifyUrl;
+      
+      if (!searchUrl || searchUrl.includes('/search') || searchUrl.includes('?term=')) {
+        const itunesSearch = await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(term)}&entity=song&limit=1`);
+        if (itunesSearch.ok) {
+          const itunesData = await itunesSearch.json();
+          if (itunesData.results && itunesData.results[0]) {
+            searchUrl = itunesData.results[0].trackViewUrl;
+          }
+        }
+      }
+
+      if (searchUrl && !searchUrl.includes('/search') && !searchUrl.includes('?term=')) {
+        const songlinkUrl = `https://api.song.link/v1-user/links?url=${encodeURIComponent(searchUrl)}`;
+        const res = await fetch(songlinkUrl);
+        if (res.ok) {
+          const data = await res.json();
+          const spotifyLink = data.linksByPlatform?.spotify?.url;
+          const appleLink = data.linksByPlatform?.appleMusic?.url;
+
+          const realSpotify = spotifyLink || `https://open.spotify.com/search/${encodeURIComponent(credit.title + ' ' + credit.artist)}`;
+          const realApple = appleLink || `https://music.apple.com/search?term=${encodeURIComponent(credit.title + ' ' + credit.artist)}`;
+
+          const updatedCredits = userCredits.map((c: any) => {
+            if (c.title === credit.title) {
+              return {
+                ...c,
+                spotifyUrl: realSpotify,
+                appleMusicUrl: realApple
+              };
+            }
+            return c;
+          });
+
+          await updateProfile({
+            claimedCredits: updatedCredits
+          });
+
+          window.open(platform === 'spotify' ? realSpotify : realApple, '_blank');
+          return;
+        }
+      }
+    } catch (err) {
+      console.error("Failed to fetch real links from Songlink", err);
+    }
+
+    const fallback = platform === 'spotify'
+      ? `https://open.spotify.com/search/${encodeURIComponent(credit.title + ' ' + credit.artist)}`
+      : `https://music.apple.com/search?term=${encodeURIComponent(credit.title + ' ' + credit.artist)}`;
+    window.open(fallback, '_blank');
+  };
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -1379,7 +1440,9 @@ export const VerifiedProfile: React.FC = () => {
         role: t.role,
         releaseDate: new Date().toISOString().split('T')[0],
         image: t.image || "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300",
-        status: 'pending_verification'
+        status: 'pending_verification',
+        spotifyUrl: (t as any).spotifyUrl || null,
+        appleMusicUrl: (t as any).appleMusicUrl || null
       }));
 
       const existingCreditsFiltered = userCredits.filter(
@@ -1454,7 +1517,9 @@ export const VerifiedProfile: React.FC = () => {
         role: claimRole,
         releaseDate: new Date().toISOString().split('T')[0],
         image: selectedClaimSong.image || "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300",
-        status: 'pending_verification'
+        status: 'pending_verification',
+        spotifyUrl: selectedClaimSong.spotifyUrl || null,
+        appleMusicUrl: selectedClaimSong.appleMusicUrl || null
       };
 
       const updatedCredits = [newCredit, ...userCredits.filter(c => c.title !== newCredit.title)];
@@ -1534,7 +1599,9 @@ export const VerifiedProfile: React.FC = () => {
         role: song.role || 'Main Producer',
         releaseDate: new Date().toISOString().split('T')[0],
         image: song.image || "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300",
-        status: 'pending_verification'
+        status: 'pending_verification',
+        spotifyUrl: song.spotifyUrl || null,
+        appleMusicUrl: song.appleMusicUrl || null
       }));
 
       // Filter out existing credits with same title to avoid duplicates
@@ -1907,39 +1974,35 @@ export const VerifiedProfile: React.FC = () => {
           </div>
           
           <div className="space-y-3">
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={customSongTitle}
-                onChange={(e) => setCustomSongTitle(e.target.value)}
-                placeholder="Song Title (e.g. My Block)"
-                className="flex-1 bg-[#121214] border border-white/10 rounded-2xl px-3 py-3.5 text-xs font-bold text-white outline-none focus:border-purple-500/50"
-              />
-              <input
-                type="text"
-                value={customSongArtist}
-                onChange={(e) => setCustomSongArtist(e.target.value)}
-                placeholder="Artist Name"
-                className="flex-1 bg-[#121214] border border-white/10 rounded-2xl px-3 py-3.5 text-xs font-bold text-white outline-none focus:border-purple-500/50"
-              />
-            </div>
-            <div className="flex gap-2">
-              <select
-                value={customSongRole}
-                onChange={(e) => setCustomSongRole(e.target.value)}
-                className="flex-1 bg-[#121214] border border-white/10 rounded-2xl px-3 py-3 text-xs font-bold text-white outline-none focus:border-purple-500/50"
-              >
-                {CREDIT_ROLES.map(role => (
-                  <option key={role} value={role}>{role}</option>
-                ))}
-              </select>
-              <button
-                onClick={handleAddCustomToQueue}
-                className="px-4 py-3 bg-purple-600 hover:bg-purple-700 text-white font-black uppercase text-[10px] tracking-widest rounded-2xl transition-all flex items-center justify-center gap-2 font-bold shrink-0 shadow-lg shadow-purple-600/20"
-              >
-                <Plus size={14} /> Add
-              </button>
-            </div>
+            <input
+              type="text"
+              value={customSongTitle}
+              onChange={(e) => setCustomSongTitle(e.target.value)}
+              placeholder="Song Title (e.g. My Block)"
+              className="w-full bg-[#121214] border border-white/10 rounded-2xl px-4 py-3.5 text-xs font-bold text-white outline-none focus:border-purple-500/50"
+            />
+            <input
+              type="text"
+              value={customSongArtist}
+              onChange={(e) => setCustomSongArtist(e.target.value)}
+              placeholder="Artist Name (e.g. Yeat)"
+              className="w-full bg-[#121214] border border-white/10 rounded-2xl px-4 py-3.5 text-xs font-bold text-white outline-none focus:border-purple-500/50"
+            />
+            <select
+              value={customSongRole}
+              onChange={(e) => setCustomSongRole(e.target.value)}
+              className="w-full bg-[#121214] border border-white/10 rounded-2xl px-4 py-3.5 text-xs font-bold text-white outline-none focus:border-purple-500/50"
+            >
+              {CREDIT_ROLES.map(role => (
+                <option key={role} value={role}>{role}</option>
+              ))}
+            </select>
+            <button
+              onClick={handleAddCustomToQueue}
+              className="w-full py-3.5 bg-purple-600 hover:bg-purple-700 text-white font-black uppercase text-[10px] tracking-widest rounded-2xl transition-all flex items-center justify-center gap-2 font-bold shadow-lg shadow-purple-600/20"
+            >
+              <Plus size={14} /> Add to Claim Queue
+            </button>
           </div>
         </div>
       </div>
@@ -2348,23 +2411,19 @@ export const VerifiedProfile: React.FC = () => {
                   <td className="py-4 uppercase tracking-wider text-[10px] text-purple-400 font-black">{credit.role}</td>
                   <td className="py-4 font-mono text-[10px] text-gray-500">{credit.releaseDate}</td>
                   <td className="py-4">
-                    <div className="flex items-center gap-2">
-                      <a
-                        href={credit.spotifyUrl || `https://open.spotify.com/search/${encodeURIComponent(credit.title + ' ' + credit.artist)}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="px-2.5 py-1.5 bg-[#1DB954]/10 hover:bg-[#1DB954]/20 border border-[#1DB954]/20 text-[#1DB954] text-[9px] font-black uppercase tracking-widest rounded-xl transition-all flex items-center gap-1 font-bold hover:scale-[1.05] active:scale-[0.95]"
+                    <div className="flex items-center gap-2 whitespace-nowrap flex-nowrap shrink-0">
+                      <button
+                        onClick={() => handleListenClick(credit, 'spotify')}
+                        className="px-3 py-1.5 bg-[#1DB954]/10 hover:bg-[#1DB954]/20 border border-[#1DB954]/20 text-[#1DB954] text-[9px] font-black uppercase tracking-widest rounded-xl transition-all flex items-center gap-1 font-bold hover:scale-[1.05] active:scale-[0.95] shrink-0"
                       >
                         🎵 Spotify
-                      </a>
-                      <a
-                        href={credit.appleMusicUrl || `https://music.apple.com/search?term=${encodeURIComponent(credit.title + ' ' + credit.artist)}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="px-2.5 py-1.5 bg-[#FA243C]/10 hover:bg-[#FA243C]/20 border border-[#FA243C]/20 text-[#FA243C] text-[9px] font-black uppercase tracking-widest rounded-xl transition-all flex items-center gap-1 font-bold hover:scale-[1.05] active:scale-[0.95]"
+                      </button>
+                      <button
+                        onClick={() => handleListenClick(credit, 'appleMusic')}
+                        className="px-3 py-1.5 bg-[#FA243C]/10 hover:bg-[#FA243C]/20 border border-[#FA243C]/20 text-[#FA243C] text-[9px] font-black uppercase tracking-widest rounded-xl transition-all flex items-center gap-1 font-bold hover:scale-[1.05] active:scale-[0.95] shrink-0"
                       >
                         🍎 Apple
-                      </a>
+                      </button>
                     </div>
                   </td>
                   <td className="py-4 text-right">
