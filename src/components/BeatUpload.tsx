@@ -107,7 +107,7 @@ export const BeatUpload: React.FC<BeatUploadProps> = ({ isOpen, onClose }) => {
       });
 
       // Update User Stats & Streak
-      await updateUserStatsAfterActivity(user.uid, 150);
+      await updateUserStatsAfterActivity(user.uid, 15);
 
       await updateDoc(doc(db, 'users', user.uid), {
         'stats.beatsFinished': increment(1),

@@ -69,7 +69,7 @@ export const ChallengesPage: React.FC = () => {
         title: 'Daily Heat',
         description: 'Complete 1 production session today.',
         type: 'daily',
-        rewardXP: 100,
+        rewardXP: 10,
         targetValue: 1,
         participantsCount: 1240,
         expiresAt: new Date(new Date().setHours(23, 59, 59, 999)).toISOString(),
@@ -79,7 +79,7 @@ export const ChallengesPage: React.FC = () => {
         title: 'Weekly Grind',
         description: 'Log 5 total hours in the studio this week.',
         type: 'weekly',
-        rewardXP: 500,
+        rewardXP: 50,
         targetValue: 300, 
         participantsCount: 5820,
         expiresAt: new Date(new Date().setDate(new Date().getDate() + 4)).toISOString(),
@@ -89,7 +89,7 @@ export const ChallengesPage: React.FC = () => {
         title: 'Community Beat Wave',
         description: 'Collectively produce 1,000 beats as a community.',
         type: 'community',
-        rewardXP: 1000,
+        rewardXP: 100,
         targetValue: 1000,
         currentGlobalValue: 425,
         participantsCount: 12400,
@@ -119,9 +119,11 @@ export const ChallengesPage: React.FC = () => {
       const ucRef = doc(db, 'userChallenges', userChallenge.id);
       batch.update(ucRef, { claimed: true, updatedAt: serverTimestamp() });
       const userRef = doc(db, 'users', user.uid);
+      const newXp = profile.xp + challenge.rewardXP;
+      const newLevel = Math.floor(Math.sqrt(newXp / 100)) + 1;
       batch.update(userRef, { 
-        xp: profile.xp + challenge.rewardXP,
-        level: Math.floor((profile.xp + challenge.rewardXP) / 1000) + 1
+        xp: newXp,
+        level: newLevel
       });
       await batch.commit();
       setClaimingId(null);

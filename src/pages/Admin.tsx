@@ -37,6 +37,13 @@ export const AdminPage: React.FC = () => {
   const [editSpotifyUrl, setEditSpotifyUrl] = useState('');
   const [editAppleMusicUrl, setEditAppleMusicUrl] = useState('');
 
+  // Edit User State
+  const [editingUser, setEditingUser] = useState<any | null>(null);
+  const [editUserXp, setEditUserXp] = useState<number>(0);
+  const [editUserLevel, setEditUserLevel] = useState<number>(1);
+  const [editUserPlan, setEditUserPlan] = useState<string>('free');
+  const [editUserRoles, setEditUserRoles] = useState<string[]>([]);
+
   // Retro Terminal States
   const [logs, setLogs] = useState<any[]>([]);
   const [terminalInput, setTerminalInput] = useState('');
@@ -147,7 +154,8 @@ export const AdminPage: React.FC = () => {
       try {
         const uSnap = await getDocs(collection(db, 'users'));
         if (!mounted) return;
-        setUsers(uSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+        const loadedUsers = uSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+        setUsers(loadedUsers.filter((u: any) => !u.deleted && u.displayName !== 'deleted'));
         
         try {
           const fSnap = await getDocs(collection(db, 'friendships'));
@@ -203,6 +211,40 @@ export const AdminPage: React.FC = () => {
     }
   };
 
+  const handleSaveUserEdit = async () => {
+    if (!editingUser) return;
+    try {
+      const userRef = doc(db, 'users', editingUser.id);
+      const updates = {
+        xp: Number(editUserXp),
+        level: Number(editUserLevel),
+        plan: editUserPlan,
+        roles: editUserRoles,
+        role: editUserRoles[0] || 'Producer'
+      };
+      
+      await updateDoc(userRef, updates);
+      
+      setUsers(prev => prev.map(u => {
+        if (u.id === editingUser.id) {
+          return { ...u, ...updates };
+        }
+        return u;
+      }));
+
+      await addSystemLog(
+        `Admin edited user "${editingUser.displayName}" details (XP: ${editUserXp}, Level: ${editUserLevel}, Plan: ${editUserPlan}, Roles: ${editUserRoles.join(', ')})`,
+        'info'
+      );
+
+      setEditingUser(null);
+      alert("User details updated successfully!");
+    } catch (err) {
+      console.error(err);
+      alert("Failed to update user details.");
+    }
+  };
+
   const handleApproveVerification = async (v: any) => {
     if (!confirm('Approve this verification claim?')) return;
     try {
@@ -218,13 +260,15 @@ export const AdminPage: React.FC = () => {
         const userData = userSnap.data();
         
         if (v.type === 'profile') {
+          const newXp = (userData.xp || 0) + 150;
+          const newLevel = Math.floor(Math.sqrt(newXp / 100)) + 1;
           await updateDoc(userRef, {
             profileVerificationStatus: 'verified',
             isProfileVerified: true,
             profileVerifiedName: v.artistName,
             profileVerifiedImage: v.imageUrl || 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300',
-            xp: (userData.xp || 0) + 1500,
-            level: Math.max(userData.level || 1, Math.floor(((userData.xp || 0) + 1500) / 1000) + 1)
+            xp: newXp,
+            level: newLevel
           });
           
           await addSystemLog(
@@ -240,7 +284,7 @@ export const AdminPage: React.FC = () => {
 
           const credits = userData.claimedCredits || [];
           const filteredCredits = credits.filter((c: any) => c.title.toLowerCase() !== v.songTitle.toLowerCase());
- 
+  
           const approvedCredits = claimRoles.map((role: string) => ({
             title: v.songTitle,
             artist: v.artistName,
@@ -254,11 +298,10 @@ export const AdminPage: React.FC = () => {
 
           const updatedCredits = [...approvedCredits, ...filteredCredits];
 
-          // Award +1000 XP bonus for verifying placement identity per credit!
+          // Award +100 XP bonus for verifying placement identity per credit!
           const currentXp = userData.xp || 0;
-          const newXp = currentXp + (1000 * claimRoles.length);
-          const currentLevel = userData.level || 1;
-          const newLevel = Math.max(currentLevel, Math.floor(newXp / 1000) + 1);
+          const newXp = currentXp + (100 * claimRoles.length);
+          const newLevel = Math.floor(Math.sqrt(newXp / 100)) + 1;
  
           await updateDoc(userRef, {
             claimedCredits: updatedCredits,
@@ -571,6 +614,19 @@ export const AdminPage: React.FC = () => {
                       </td>
                       <td className="p-4 text-right">
                         <div className="flex justify-end gap-2">
+                          <button 
+                            onClick={() => {
+                              setEditingUser(u);
+                              setEditUserXp(u.xp || 0);
+                              setEditUserLevel(u.level || 1);
+                              setEditUserPlan(u.plan || 'free');
+                              setEditUserRoles(u.roles || (u.role ? [u.role] : []));
+                            }} 
+                            className="p-2 text-gray-500 hover:bg-red-500/20 hover:text-red-400 rounded-xl transition-colors" 
+                            title="Edit User Details & Roles"
+                          >
+                            <Edit size={16} />
+                          </button>
                           <button onClick={() => removeUser(u.id)} className="p-2 text-gray-500 hover:bg-red-500/20 hover:text-red-400 rounded-xl transition-colors" title="Delete User">
                             <Trash2 size={16} />
                           </button>
@@ -977,6 +1033,108 @@ export const AdminPage: React.FC = () => {
                 className="px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white text-[10px] font-black uppercase tracking-widest rounded-2xl transition-all font-bold shadow-lg shadow-purple-600/20"
               >
                 Save & Update Details
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Edit User Modal */}
+      {editingUser && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-6 bg-black/80 backdrop-blur-md animate-in fade-in duration-300">
+          <div className="w-full max-w-lg bg-[#121214] border border-white/10 rounded-[3rem] p-8 max-h-[90vh] overflow-y-auto custom-scrollbar flex flex-col space-y-6">
+            <div>
+              <h3 className="text-2xl font-black italic tracking-tighter uppercase text-white flex items-center gap-2">
+                Edit User Profile & Permissions
+              </h3>
+              <p className="text-[10px] text-gray-500 uppercase tracking-widest font-black mt-1">
+                Moderator and administrative access control console for {editingUser.displayName || 'Creator'}
+              </p>
+            </div>
+
+            <div className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-[9px] font-black uppercase tracking-widest text-gray-400">XP Value</label>
+                <input
+                  type="number"
+                  value={editUserXp}
+                  onChange={(e) => {
+                    const newXp = Number(e.target.value);
+                    setEditUserXp(newXp);
+                    // Automatically calculate level from XP to make the admin's life easier!
+                    setEditUserLevel(Math.floor(Math.sqrt(newXp / 100)) + 1);
+                  }}
+                  className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-red-500/50 transition-all font-bold text-white"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-[9px] font-black uppercase tracking-widest text-gray-400">Level (Calculated)</label>
+                <input
+                  type="number"
+                  value={editUserLevel}
+                  onChange={(e) => setEditUserLevel(Number(e.target.value))}
+                  className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-red-500/50 transition-all font-bold text-white"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-[9px] font-black uppercase tracking-widest text-gray-400">Account Subscription / Plan Tier</label>
+                <select
+                  value={editUserPlan}
+                  onChange={(e) => setEditUserPlan(e.target.value)}
+                  className="w-full bg-[#121214] border border-white/10 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-red-500/50 transition-all font-bold text-white cursor-pointer"
+                >
+                  <option value="free">Free Tier</option>
+                  <option value="pro">Pro Tier</option>
+                  <option value="moderator">Moderator Tier (Dashboard Access)</option>
+                  <option value="admin">Administrator Tier (Full Root Control)</option>
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[9px] font-black uppercase tracking-widest text-gray-400 block">
+                  Security & Profile Roles (Select to Grant Access)
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {['Admin', 'Moderator', 'Producer', 'Guest Producer', 'Guest'].map(role => {
+                    const isSelected = editUserRoles.includes(role);
+                    return (
+                      <button
+                        key={role}
+                        type="button"
+                        onClick={() => {
+                          setEditUserRoles(prev => 
+                            prev.includes(role) 
+                              ? prev.filter(r => r !== role) 
+                              : [...prev, role]
+                          );
+                        }}
+                        className={`px-3 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-wider border transition-all flex items-center justify-center text-center ${
+                          isSelected 
+                            ? 'bg-red-500/20 text-red-400 border-red-500/40 shadow-lg shadow-red-600/10' 
+                            : 'bg-white/5 text-gray-400 border-white/5 hover:bg-white/10 hover:text-white'
+                        }`}
+                      >
+                        {role}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-3 justify-end border-t border-white/5 pt-4 mt-2">
+              <button
+                onClick={() => setEditingUser(null)}
+                className="px-6 py-3 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-[10px] font-black uppercase tracking-widest rounded-2xl transition-all font-bold"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveUserEdit}
+                className="px-6 py-3 bg-red-600 hover:bg-red-700 text-white text-[10px] font-black uppercase tracking-widest rounded-2xl transition-all font-bold shadow-lg shadow-red-600/20"
+              >
+                Apply Profile Overrides
               </button>
             </div>
           </div>

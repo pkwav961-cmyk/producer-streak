@@ -6,6 +6,7 @@ import { collection, query, orderBy, limit, getDocs } from 'firebase/firestore';
 import { UserProfile } from '../types';
 import { useAuth } from '../lib/AuthContext';
 import { exportLeaderboardCard } from '../lib/canvasExporter';
+import { VerifiedBadge } from '../components/VerifiedBadge';
 
 export const Leaderboard: React.FC = () => {
   const { profile } = useAuth();
@@ -56,7 +57,7 @@ export const Leaderboard: React.FC = () => {
                 level: u.level || 1,
                 rank: idx + 1
               }));
-              exportLeaderboardCard(formattedRankings, profile?.displayName || 'Creator', myRank);
+              exportLeaderboardCard(formattedRankings, profile?.displayName || 'Creator', myRank, profile?.profileVerifiedImage || profile?.photoURL || '');
             }}
             className="flex items-center gap-2 px-5 py-3 bg-pink-500/10 hover:bg-pink-500/20 border border-pink-500/30 rounded-2xl text-xs font-black uppercase tracking-widest transition-all text-pink-300 animate-pulse hover:scale-105 shadow-xl shadow-pink-500/10"
           >
@@ -98,7 +99,7 @@ export const Leaderboard: React.FC = () => {
                 <h3 className="text-xl font-black uppercase tracking-tight flex items-center gap-2">
                   {user.displayName}
                   {user.verifiedBadges?.includes('Verified Producer') && (
-                    <Star className="w-4 h-4 text-blue-400 fill-blue-400" />
+                    <VerifiedBadge size={16} />
                   )}
                 </h3>
                 <p className="text-gray-400 font-bold uppercase tracking-widest text-[10px]">

@@ -59,7 +59,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         try {
           const initialSnap = await getDoc(userRef);
           if (initialSnap.exists() && isMounted) {
-            setProfile({ uid: initialSnap.id, ...initialSnap.data() } as UserProfile);
+            const data = initialSnap.data();
+            setProfile({ uid: initialSnap.id, ...data } as UserProfile);
+            const isUserAdmin = adminEmails.includes(String(currentUser.email).toLowerCase()) || 
+                                data.role === 'admin' || 
+                                data.role === 'moderator' ||
+                                (data.roles && (data.roles.includes('admin') || data.roles.includes('moderator'))) ||
+                                data.plan === 'admin' ||
+                                data.plan === 'moderator';
+            setIsAdmin(isUserAdmin);
             setLoading(false);
             clearTimeout(safetyTimeout);
           }
@@ -71,7 +79,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (!isMounted) return;
           
           if (snapshot.exists()) {
-            setProfile({ uid: snapshot.id, ...snapshot.data() } as UserProfile);
+            const data = snapshot.data();
+            setProfile({ uid: snapshot.id, ...data } as UserProfile);
+            
+            const isUserAdmin = adminEmails.includes(String(currentUser.email).toLowerCase()) || 
+                                data.role === 'admin' || 
+                                data.role === 'moderator' ||
+                                (data.roles && (data.roles.includes('admin') || data.roles.includes('moderator'))) ||
+                                data.plan === 'admin' ||
+                                data.plan === 'moderator';
+            setIsAdmin(isUserAdmin);
             setLoading(false);
             clearTimeout(safetyTimeout);
           } else {

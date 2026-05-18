@@ -260,7 +260,7 @@ export const SessionsPage: React.FC = () => {
                     genre: s.notes ? s.notes.split('\n')[0] : 'Collab Session',
                     bpm: '140'
                   }));
-                  exportSessionsCard(items, profile?.displayName || 'Creator');
+                  exportSessionsCard(items, profile?.displayName || 'Creator', profile?.profileVerifiedImage || profile?.photoURL || '');
                 }} 
                 className="flex items-center gap-2 px-4 py-2 bg-pink-500/10 hover:bg-pink-500/20 border border-pink-500/30 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all text-pink-300 animate-pulse"
               >

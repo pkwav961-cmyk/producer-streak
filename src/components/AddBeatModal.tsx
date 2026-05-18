@@ -161,7 +161,7 @@ export const AddBeatModal: React.FC<AddBeatModalProps> = ({ isOpen, onClose }) =
 
       await addDoc(collection(db, 'beats'), beatData);
 
-      await updateUserStatsAfterActivity(user.uid, 150);
+      await updateUserStatsAfterActivity(user.uid, 15);
 
       const userRef = doc(db, 'users', user.uid);
       await updateDoc(userRef, {
@@ -222,7 +222,7 @@ export const AddBeatModal: React.FC<AddBeatModalProps> = ({ isOpen, onClose }) =
                   <Check size={32} strokeWidth={3} />
                 </div>
                 <h3 className="text-lg font-black uppercase italic">{successLabel}</h3>
-                <p className="text-gray-400 font-bold uppercase text-[10px] tracking-widest">+150 XP Earned</p>
+                <p className="text-gray-400 font-bold uppercase text-[10px] tracking-widest">+15 XP Earned</p>
               </div>
             ) : (
               <form onSubmit={handleSubmit} className="space-y-4">

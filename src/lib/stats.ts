@@ -10,7 +10,7 @@ export async function updateUserStatsAfterActivity(userId: string, xpEarned: num
   const profile = profileSnap.data();
   const currentXP = profile.xp || 0;
   const totalXP = currentXP + xpEarned;
-  const newLevel = Math.floor(Math.sqrt(totalXP / 10)) + 1;
+  const newLevel = Math.floor(Math.sqrt(totalXP / 100)) + 1;
 
   const lastActivityDate = profile.lastActivityDate;
   const today = new Date();

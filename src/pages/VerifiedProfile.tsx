@@ -6,6 +6,7 @@ import { GlassCard } from '../components/UI';
 import { db } from '../lib/firebase';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { exportCreditsCard, exportSpotlightCard } from '../lib/canvasExporter';
+import { VerifiedBadge } from '../components/VerifiedBadge';
 import { sendCreditsVerificationEmail, sendVerificationPendingEmail } from '../lib/adminEmails';
 import { addSystemLog } from '../lib/systemLogs';
 
@@ -724,7 +725,8 @@ export const VerifiedProfile: React.FC = () => {
       }
       await exportSpotlightCard(
         verifiedOnly.slice(0, 3),
-        profile?.displayName || 'Creator'
+        profile?.displayName || 'Creator',
+        profile?.profileVerifiedImage || profile?.photoURL || ''
       );
     } catch (err) {
       console.error("Failed to export spotlight card", err);
@@ -752,7 +754,11 @@ export const VerifiedProfile: React.FC = () => {
     }
 
     try {
-      await exportCreditsCard(limited, profile?.displayName || 'Creator');
+      await exportCreditsCard(
+        limited, 
+        profile?.displayName || 'Creator',
+        profile?.profileVerifiedImage || profile?.photoURL || ''
+      );
       setIsExportCreditsModalOpen(false);
     } catch (err) {
       console.error(err);
@@ -1793,7 +1799,9 @@ export const VerifiedProfile: React.FC = () => {
           };
         });
 
-      const xpIncrement = updatedAccounts.length * 400;
+      const xpIncrement = updatedAccounts.length * 50;
+      const newXp = (profile?.xp || 0) + xpIncrement;
+      const newLevel = Math.floor(Math.sqrt(newXp / 100)) + 1;
 
       const profileUpdate: any = {
         linkedAccounts: updatedAccounts,
@@ -1803,7 +1811,8 @@ export const VerifiedProfile: React.FC = () => {
         songstatsShazams: aggregatedShazams,
         songstatsVideos: aggregatedVideos,
         songstatsViews: aggregatedViews,
-        xp: (profile?.xp || 0) + xpIncrement,
+        xp: newXp,
+        level: newLevel,
         verifiedBadges: updatedAccounts.length > 0
           ? Array.from(new Set([...(profile?.verifiedBadges || []), 'Verified Producer']))
           : (profile?.verifiedBadges || []).filter(b => b !== 'Verified Producer')
@@ -1844,14 +1853,17 @@ export const VerifiedProfile: React.FC = () => {
             className="w-32 h-32 rounded-full object-cover border-4 border-purple-500/20 shadow-2xl"
           />
           {profile?.profileVerificationStatus === 'verified' && (
-            <div className="absolute -bottom-1 -right-1 bg-purple-600 text-white rounded-full p-2.5 border-4 border-[#0c0c0e] shadow-xl">
-              <CheckCircle2 size={20} fill="white" className="text-purple-600" />
+            <div className="absolute -bottom-1 -right-1 bg-transparent border-4 border-[#0c0c0e] rounded-full overflow-hidden shadow-xl flex items-center justify-center">
+              <VerifiedBadge size={28} />
             </div>
           )}
         </div>
 
-        <h1 className="text-3xl font-black tracking-tighter uppercase italic mt-6 flex items-center gap-2 text-white">
+        <h1 className="text-3xl font-black tracking-tighter uppercase italic mt-6 flex items-center justify-center gap-2 text-white">
           {profile?.profileVerifiedName || profile?.displayName || 'STAZ EQ'}
+          {profile?.profileVerificationStatus === 'verified' && (
+            <VerifiedBadge size={22} />
+          )}
         </h1>
         <p className="text-[10px] text-purple-400 font-black uppercase tracking-widest mt-2 bg-purple-500/10 px-4 py-1.5 rounded-full border border-purple-500/20">
           {profile?.role || 'Gold Member'}
@@ -2394,6 +2406,9 @@ export const VerifiedProfile: React.FC = () => {
                       <div>
                         <div className="flex items-center gap-2">
                           <p className="font-bold text-white uppercase">{credit.title}</p>
+                          {credit.status !== 'pending_verification' && (
+                            <VerifiedBadge size={14} />
+                          )}
                           {credit.status === 'pending_verification' ? (
                             <span className="px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-500 border border-amber-500/20 text-[8px] font-black uppercase tracking-widest shrink-0 animate-pulse">
                               Processing Claim
