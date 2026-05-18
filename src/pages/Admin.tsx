@@ -2,9 +2,18 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useAuth } from '../lib/AuthContext';
 import { collection, getDocs, deleteDoc, doc, query, where, getDoc, updateDoc, onSnapshot, limit, orderBy, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { Search, Users, Activity, UserPlus, HeartHandshake, ShieldAlert, Trash2, Ban, CheckCircle, XCircle, Eye, Terminal, Loader2 } from 'lucide-react';
+import { Search, Users, Activity, UserPlus, HeartHandshake, ShieldAlert, Trash2, Ban, CheckCircle, XCircle, Eye, Terminal, Loader2, Edit } from 'lucide-react';
 import { GlassCard } from '../components/UI';
 import { addSystemLog } from '../lib/systemLogs';
+
+const CREDIT_ROLES = [
+  'Main Producer',
+  'Co-Producer',
+  'Vocal Engineer',
+  'Mixing Engineer',
+  'Mastering Engineer',
+  'Songwriter'
+];
 
 export const AdminPage: React.FC = () => {
   const { user, isAdmin } = useAuth();
@@ -18,6 +27,15 @@ export const AdminPage: React.FC = () => {
   const [verifications, setVerifications] = useState<any[]>([]);
   const [loadingVerifications, setLoadingVerifications] = useState(false);
   const [selectedProofUrl, setSelectedProofUrl] = useState<string | null>(null);
+
+  // Edit Verification State
+  const [editingVerification, setEditingVerification] = useState<any | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editArtist, setEditArtist] = useState('');
+  const [editImageUrl, setEditImageUrl] = useState('');
+  const [editRoles, setEditRoles] = useState<string[]>([]);
+  const [editSpotifyUrl, setEditSpotifyUrl] = useState('');
+  const [editAppleMusicUrl, setEditAppleMusicUrl] = useState('');
 
   // Retro Terminal States
   const [logs, setLogs] = useState<any[]>([]);
@@ -216,17 +234,29 @@ export const AdminPage: React.FC = () => {
           
           alert("Profile Identity Verification successfully approved! Artist profile unlocked.");
         } else {
+          const claimRoles: string[] = v.roles && v.roles.length > 0 
+            ? v.roles 
+            : (v.role ? v.role.split(',').map((r: string) => r.trim()) : ['Main Producer']);
+
           const credits = userData.claimedCredits || [];
-          const updatedCredits = credits.map((c: any) => {
-            if (c.title === v.songTitle) {
-              return { ...c, status: 'verified' };
-            }
-            return c;
-          });
+          const filteredCredits = credits.filter((c: any) => c.title.toLowerCase() !== v.songTitle.toLowerCase());
  
-          // Award +1000 XP bonus for verifying placement identity!
+          const approvedCredits = claimRoles.map((role: string) => ({
+            title: v.songTitle,
+            artist: v.artistName,
+            role: role,
+            releaseDate: v.releaseDate || new Date().toISOString().split('T')[0],
+            image: v.imageUrl || 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300',
+            status: 'verified',
+            spotifyUrl: v.spotifyUrl || null,
+            appleMusicUrl: v.appleMusicUrl || null
+          }));
+
+          const updatedCredits = [...approvedCredits, ...filteredCredits];
+
+          // Award +1000 XP bonus for verifying placement identity per credit!
           const currentXp = userData.xp || 0;
-          const newXp = currentXp + 1000;
+          const newXp = currentXp + (1000 * claimRoles.length);
           const currentLevel = userData.level || 1;
           const newLevel = Math.max(currentLevel, Math.floor(newXp / 1000) + 1);
  
@@ -237,11 +267,11 @@ export const AdminPage: React.FC = () => {
           });
 
           await addSystemLog(
-            `Verification APPROVED: Credit claim for track "${v.songTitle}" by artist "${v.artistName}" for User "${v.userName}" (${v.userEmail})`,
+            `Verification APPROVED: ${claimRoles.length} Credit(s) [${claimRoles.join(', ')}] for track "${v.songTitle}" by artist "${v.artistName}" for User "${v.userName}" (${v.userEmail})`,
             'success'
           );
 
-          alert("Verification successfully approved! User awarded +1000 XP bonus.");
+          alert(`Verification successfully approved! User awarded +${1000 * claimRoles.length} XP bonus for ${claimRoles.length} credit(s).`);
         }
       }
  
@@ -600,7 +630,9 @@ export const AdminPage: React.FC = () => {
                           <h4 className="font-bold text-base text-white">{v.songTitle}</h4>
                         )}
                         <p className="text-xs text-purple-400 font-black uppercase tracking-widest mt-1">
-                          {v.type === 'profile' ? `Genius Creator Profile` : `Artist: ${v.artistName} • Role: ${v.role}`}
+                          {v.type === 'profile' 
+                            ? `Genius Creator Profile` 
+                            : `Artist: ${v.artistName} • Role: ${v.roles && v.roles.length > 0 ? v.roles.join(', ') : (v.role || 'Main Producer')}`}
                         </p>
                         
                         <div className="mt-3 bg-white/5 border border-white/5 rounded-xl p-3">
@@ -631,16 +663,36 @@ export const AdminPage: React.FC = () => {
                         </button>
                       )}
                       
+                      {v.type !== 'profile' && (
+                        <button 
+                          onClick={() => {
+                            setEditingVerification(v);
+                            setEditTitle(v.songTitle || '');
+                            setEditArtist(v.artistName || '');
+                            setEditImageUrl(v.imageUrl || '');
+                            setEditSpotifyUrl(v.spotifyUrl || '');
+                            setEditAppleMusicUrl(v.appleMusicUrl || '');
+                            const currentRoles = v.roles && v.roles.length > 0 
+                              ? v.roles 
+                              : (v.role ? v.role.split(',').map((r: string) => r.trim()) : ['Main Producer']);
+                            setEditRoles(currentRoles);
+                          }}
+                          className="px-4 py-2.5 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-blue-400 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-1.5 shrink-0 hover:scale-[1.03] active:scale-[0.97]"
+                        >
+                          <Edit size={12} /> Edit Details
+                        </button>
+                      )}
+
                       <button 
                         onClick={() => handleApproveVerification(v)}
-                        className="px-4 py-2.5 bg-green-500 hover:bg-green-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-1.5 shrink-0 shadow-lg shadow-green-500/10"
+                        className="px-4 py-2.5 bg-green-500 hover:bg-green-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-1.5 shrink-0 shadow-lg shadow-green-500/10 hover:scale-[1.03] active:scale-[0.97]"
                       >
                         <CheckCircle size={12} /> Approve
                       </button>
  
                       <button 
                         onClick={() => handleRejectVerification(v)}
-                        className="px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-1.5 shrink-0 shadow-lg shadow-red-600/10"
+                        className="px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-1.5 shrink-0 shadow-lg shadow-red-600/10 hover:scale-[1.03] active:scale-[0.97]"
                       >
                         <XCircle size={12} /> Reject
                       </button>
@@ -738,8 +790,8 @@ export const AdminPage: React.FC = () => {
 
       {/* Proof Modal Viewer */}
       {selectedProofUrl && (
-        <div className="fixed inset-0 z-[150] flex items-center justify-center p-6 bg-black/90 backdrop-blur-md">
-          <div className="relative max-w-3xl max-h-[85vh] overflow-hidden bg-[#121214] border border-white/10 rounded-[2rem] p-6 shadow-2xl flex flex-col items-center">
+        <div className="fixed inset-0 z-[150] flex items-center justify-center p-6 bg-black/90 backdrop-blur-md" onClick={() => setSelectedProofUrl(null)}>
+          <div className="relative max-w-3xl max-h-[85vh] overflow-hidden bg-[#121214] border border-white/10 rounded-[2rem] p-6 shadow-2xl flex flex-col items-center" onClick={e => e.stopPropagation()}>
             <button 
               onClick={() => setSelectedProofUrl(null)}
               className="absolute top-4 right-4 p-2 text-gray-500 hover:text-white transition-colors bg-black/50 rounded-full"
@@ -750,6 +802,183 @@ export const AdminPage: React.FC = () => {
               <img src={selectedProofUrl} alt="Uploaded distributor / social proof screenshot" className="max-w-full max-h-[70vh] rounded-xl object-contain border border-white/5" />
             </div>
             <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mt-4">Screenshot Evidence Submitted by Creator</p>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Details & Multi-Credit Modal */}
+      {editingVerification && (
+        <div className="fixed inset-0 z-[150] flex items-center justify-center p-6 bg-black/95 backdrop-blur-md" onClick={() => setEditingVerification(null)}>
+          <div 
+            className="relative w-full max-w-2xl bg-[#0c0c0e]/95 border border-white/10 rounded-[2.5rem] p-8 shadow-2xl flex flex-col gap-6 animate-in zoom-in-95 duration-200"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="space-y-2 border-b border-white/5 pb-4">
+              <h3 className="text-base font-black uppercase italic tracking-tight text-white flex items-center gap-2">
+                ✍️ Edit Placement Verification Details
+              </h3>
+              <p className="text-[10px] text-gray-500 uppercase tracking-widest font-black">
+                Modify cover artwork, streaming link connections, and award multiple credits/roles
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <label className="text-[9px] font-black uppercase tracking-widest text-gray-400">Song Title</label>
+                <input 
+                  type="text"
+                  value={editTitle}
+                  onChange={e => setEditTitle(e.target.value)}
+                  className="w-full bg-[#121214] border border-white/10 rounded-2xl px-4 py-3 text-xs font-bold text-white outline-none focus:border-purple-500/50"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[9px] font-black uppercase tracking-widest text-gray-400">Artist Name</label>
+                <input 
+                  type="text"
+                  value={editArtist}
+                  onChange={e => setEditArtist(e.target.value)}
+                  className="w-full bg-[#121214] border border-white/10 rounded-2xl px-4 py-3 text-xs font-bold text-white outline-none focus:border-purple-500/50"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[9px] font-black uppercase tracking-widest text-gray-400 block">Cover Art URL</label>
+              <div className="flex gap-4 items-center">
+                <div className="w-16 h-16 rounded-xl border border-white/10 overflow-hidden bg-white/5 shrink-0 flex items-center justify-center">
+                  <img 
+                    src={editImageUrl || "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=100"} 
+                    alt="Preview" 
+                    className="w-full h-full object-cover"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).src = "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=100";
+                    }}
+                  />
+                </div>
+                <input 
+                  type="text"
+                  value={editImageUrl}
+                  onChange={e => setEditImageUrl(e.target.value)}
+                  placeholder="Paste artwork URL..."
+                  className="flex-1 bg-[#121214] border border-white/10 rounded-2xl px-4 py-3.5 text-xs font-bold text-white outline-none focus:border-purple-500/50"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <label className="text-[9px] font-black uppercase tracking-widest text-gray-400">Spotify Play Link</label>
+                <input 
+                  type="text"
+                  value={editSpotifyUrl}
+                  onChange={e => setEditSpotifyUrl(e.target.value)}
+                  placeholder="https://open.spotify.com/track/..."
+                  className="w-full bg-[#121214] border border-white/10 rounded-2xl px-4 py-3 text-xs font-bold text-white outline-none focus:border-[#1DB954]/50"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[9px] font-black uppercase tracking-widest text-gray-400">Apple Music Play Link</label>
+                <input 
+                  type="text"
+                  value={editAppleMusicUrl}
+                  onChange={e => setEditAppleMusicUrl(e.target.value)}
+                  placeholder="https://music.apple.com/album/..."
+                  className="w-full bg-[#121214] border border-white/10 rounded-2xl px-4 py-3 text-xs font-bold text-white outline-none focus:border-[#FA243C]/50"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[9px] font-black uppercase tracking-widest text-gray-400 block">
+                Assign Placements & Roles (Select one or more credits to award)
+              </label>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {CREDIT_ROLES.map(role => {
+                  const isSelected = editRoles.includes(role);
+                  return (
+                    <button
+                      key={role}
+                      type="button"
+                      onClick={() => {
+                        setEditRoles(prev => 
+                          prev.includes(role) 
+                            ? prev.filter(r => r !== role) 
+                            : [...prev, role]
+                        );
+                      }}
+                      className={`px-3 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-wider border transition-all flex items-center justify-center text-center ${
+                        isSelected 
+                          ? 'bg-purple-600/20 text-purple-400 border-purple-500/40 shadow-lg shadow-purple-600/10' 
+                          : 'bg-white/5 text-gray-400 border-white/5 hover:bg-white/10 hover:text-white'
+                      }`}
+                    >
+                      {role}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="flex gap-3 justify-end border-t border-white/5 pt-4 mt-2">
+              <button
+                onClick={() => setEditingVerification(null)}
+                className="px-6 py-3 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-[10px] font-black uppercase tracking-widest rounded-2xl transition-all font-bold"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  if (!editTitle.trim() || !editArtist.trim()) {
+                    alert("Song Title and Artist Name are required!");
+                    return;
+                  }
+                  if (editRoles.length === 0) {
+                    alert("Please select at least one credit role!");
+                    return;
+                  }
+                  try {
+                    await updateDoc(doc(db, 'pendingVerifications', editingVerification.id), {
+                      songTitle: editTitle,
+                      artistName: editArtist,
+                      imageUrl: editImageUrl || 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300',
+                      roles: editRoles,
+                      spotifyUrl: editSpotifyUrl || null,
+                      appleMusicUrl: editAppleMusicUrl || null
+                    });
+
+                    setVerifications(prev => prev.map(item => {
+                      if (item.id === editingVerification.id) {
+                        return {
+                          ...item,
+                          songTitle: editTitle,
+                          artistName: editArtist,
+                          imageUrl: editImageUrl || 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300',
+                          roles: editRoles,
+                          spotifyUrl: editSpotifyUrl || null,
+                          appleMusicUrl: editAppleMusicUrl || null
+                        };
+                      }
+                      return item;
+                    }));
+
+                    await addSystemLog(
+                      `Admin updated verification details for claim "${editTitle}" by user "${editingVerification.userName}"`,
+                      'info'
+                    );
+
+                    setEditingVerification(null);
+                    alert("Claim details updated successfully!");
+                  } catch (err) {
+                    console.error(err);
+                    alert("Failed to update verification claim details.");
+                  }
+                }}
+                className="px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white text-[10px] font-black uppercase tracking-widest rounded-2xl transition-all font-bold shadow-lg shadow-purple-600/20"
+              >
+                Save & Update Details
+              </button>
+            </div>
           </div>
         </div>
       )}
