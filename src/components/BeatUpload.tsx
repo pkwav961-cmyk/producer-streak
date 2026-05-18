@@ -18,6 +18,7 @@ export const BeatUpload: React.FC<BeatUploadProps> = ({ isOpen, onClose }) => {
   const { user } = useAuth();
   const [audioUrl, setAudioUrl] = useState('');
   const [audioFile, setAudioFile] = useState<File | null>(null);
+  const [uploadMode, setUploadMode] = useState<'url' | 'file'>(audioFile ? 'file' : 'url');
   const [title, setTitle] = useState('');
   const [genre, setGenre] = useState('');
   const [status, setStatus] = useState<'finished' | 'sketch' | 'mixed' | 'mastered'>('finished');
@@ -63,12 +64,30 @@ export const BeatUpload: React.FC<BeatUploadProps> = ({ isOpen, onClose }) => {
 
       // Upload file to R2 if provided
       if (audioFile) {
-        const result = await uploadToR2({
-          file: audioFile,
-          folder: `beats/${user.uid}`,
-          onProgress: (progress) => setUploadProgress(progress),
-        });
-        finalAudioUrl = result.url;
+        try {
+          const result = await uploadToR2({
+            file: audioFile,
+            folder: `beats/${user.uid}`,
+            onProgress: (progress) => setUploadProgress(progress),
+          });
+          finalAudioUrl = result.url;
+        } catch (r2err) {
+          console.warn('R2 upload failed, falling back to Firebase Storage:', r2err);
+          setUploadError('Cloud upload failed, uploading to Firebase Storage as fallback.');
+          // Fallback: upload to Firebase Storage
+          try {
+            const timestamp = Date.now();
+            const safeName = `${timestamp}-${audioFile.name}`;
+            const storageRef = ref(storage, `beats/${user.uid}/${safeName}`);
+            const snapshot = await uploadBytes(storageRef, audioFile);
+            const firebaseUrl = await getDownloadURL(snapshot.ref);
+            finalAudioUrl = firebaseUrl;
+            setUploadProgress(100);
+          } catch (fbErr) {
+            console.error('Firebase Storage fallback failed:', fbErr);
+            throw fbErr;
+          }
+        }
       }
 
       // Save to Firestore
@@ -148,9 +167,9 @@ export const BeatUpload: React.FC<BeatUploadProps> = ({ isOpen, onClose }) => {
             {/* Upload Method Tabs */}
             <div className="flex gap-2 bg-white/5 p-1 rounded-2xl">
               <button
-                onClick={() => setAudioFile(null)}
+                onClick={() => setUploadMode('url')}
                 className={`flex-1 py-2 rounded-xl text-xs font-bold uppercase tracking-widest transition-all ${
-                  !audioFile
+                  uploadMode === 'url'
                     ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
                     : 'text-gray-400 hover:text-white'
                 }`}
@@ -158,9 +177,9 @@ export const BeatUpload: React.FC<BeatUploadProps> = ({ isOpen, onClose }) => {
                 Paste URL
               </button>
               <button
-                onClick={() => setAudioUrl('')}
+                onClick={() => setUploadMode('file')}
                 className={`flex-1 py-2 rounded-xl text-xs font-bold uppercase tracking-widest transition-all ${
-                  audioFile
+                  uploadMode === 'file'
                     ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
                     : 'text-gray-400 hover:text-white'
                 }`}
@@ -177,7 +196,7 @@ export const BeatUpload: React.FC<BeatUploadProps> = ({ isOpen, onClose }) => {
             )}
 
             {/* URL Input OR File Upload */}
-            {!audioFile ? (
+            {uploadMode === 'url' ? (
               <div
                 className={`border-2 border-dashed rounded-[2rem] p-12 flex flex-col items-center justify-center transition-all ${
                   audioUrl
@@ -210,19 +229,33 @@ export const BeatUpload: React.FC<BeatUploadProps> = ({ isOpen, onClose }) => {
                   <div className="w-16 h-16 bg-green-500 rounded-full flex items-center justify-center text-white mb-4">
                     <UploadCloud size={32} />
                   </div>
-                  <p className="font-bold text-white text-sm">{audioFile.name}</p>
-                  <p className="text-[10px] text-green-400 mt-2">
-                    {(audioFile.size / 1024 / 1024).toFixed(2)}MB
-                  </p>
-                  <p className="text-[10px] font-black text-green-400 uppercase tracking-widest mt-3">
-                    CLICK TO CHANGE
-                  </p>
+                  {audioFile ? (
+                    <>
+                      <p className="font-bold text-white text-sm">{audioFile.name}</p>
+                      <p className="text-[10px] text-green-400 mt-2">
+                        {(audioFile.size / 1024 / 1024).toFixed(2)}MB
+                      </p>
+                      <p className="text-[10px] font-black text-green-400 uppercase tracking-widest mt-3">
+                        CLICK TO CHANGE
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="font-bold text-white text-sm">Select Audio File</p>
+                      <p className="text-[10px] text-green-400 mt-2">
+                        MP3, WAV, FLAC (Max 50MB)
+                      </p>
+                      <p className="text-[10px] font-black text-green-400 uppercase tracking-widest mt-3">
+                        CLICK TO UPLOAD
+                      </p>
+                    </>
+                  )}
                 </div>
                 <input
                   ref={fileInputRef}
                   type="file"
                   accept="audio/*"
-                  onChange={handleFileSelect}
+                  onChange={(e) => { handleFileSelect(e); setUploadMode('file'); }}
                   className="hidden"
                 />
               </div>

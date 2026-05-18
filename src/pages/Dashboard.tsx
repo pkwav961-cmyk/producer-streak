@@ -7,7 +7,6 @@ import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, where, onSnapshot, orderBy, limit } from 'firebase/firestore';
 import { Beat } from '../types';
 import { StreakRing } from '../components/StreakRing';
-import { BeatUpload } from '../components/BeatUpload';
 
 export const Dashboard: React.FC<{ setActiveTab?: (tab: string) => void }> = (props) => {
   const { user, profile } = useAuth();
@@ -16,7 +15,14 @@ export const Dashboard: React.FC<{ setActiveTab?: (tab: string) => void }> = (pr
   const [recentSessions, setRecentSessions] = useState<any[]>([]);
   const [playingBeatId, setPlayingBeatId] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const [isUploadOpen, setIsUploadOpen] = useState(false);
+
+  const isArtist = profile?.role === 'artist';
+  const isEngineer = profile?.role === 'engineer';
+  
+  const beatsCreatedLabel = isArtist ? 'Songs Created' : isEngineer ? 'Mixes Completed' : 'Beats Created';
+  const submitLabel = isArtist ? 'Submit Song' : isEngineer ? 'Submit Mix' : 'Submit Beat';
+  const recentLabel = isArtist ? 'Recent Songs' : isEngineer ? 'Recent Mixes' : 'Recent Beats';
+  const emptyLabel = isArtist ? 'No songs tracked yet' : isEngineer ? 'No mixes tracked yet' : 'No beats tracked yet';
 
   useEffect(() => {
     if (!user) return;
@@ -194,7 +200,7 @@ export const Dashboard: React.FC<{ setActiveTab?: (tab: string) => void }> = (pr
                 <Music2 size={24} className="text-orange-400" />
               </div>
               <div>
-                <p className="text-[10px] font-black uppercase tracking-widest text-orange-400">Beats Created</p>
+                <p className="text-[10px] font-black uppercase tracking-widest text-orange-400">{beatsCreatedLabel}</p>
                 <p className="text-2xl font-black italic text-white">{recentBeats.length}</p>
               </div>
             </div>
@@ -297,32 +303,11 @@ export const Dashboard: React.FC<{ setActiveTab?: (tab: string) => void }> = (pr
         </button>
       </section>
 
-      {/* Finish Beat CTA */}
-      <section>
-        <button 
-          onClick={() => setIsUploadOpen(true)}
-          className="w-full bg-white text-black p-6 rounded-3xl flex items-center justify-between group overflow-hidden relative shadow-2xl transition-all hover:scale-[1.02] active:scale-95"
-        >
-          <div className="flex items-center gap-4 relative z-10">
-            <div className="w-12 h-12 bg-black/5 rounded-2xl flex items-center justify-center text-black">
-              <Upload size={24} />
-            </div>
-            <div className="text-left font-black uppercase tracking-widest">
-              <p className="text-[10px] text-black/50 mb-0.5">Finished a heat?</p>
-              <p className="text-lg text-black">Submit Beat</p>
-            </div>
-          </div>
-          <ChevronRight className="text-black/30 group-hover:text-black group-hover:translate-x-1 transition-all relative z-10" />
-        </button>
-      </section>
-
-      <BeatUpload isOpen={isUploadOpen} onClose={() => setIsUploadOpen(false)} />
-
 
       {/* Recent Beats */}
       <section className="space-y-6">
         <div className="flex items-center justify-between">
-          <h3 className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Recent Beats</h3>
+          <h3 className="text-[10px] font-black text-gray-500 uppercase tracking-widest">{recentLabel}</h3>
           <button 
             onClick={() => props.setActiveTab?.('timer')}
             className="text-[10px] font-black text-gray-400 uppercase tracking-widest hover:text-white transition-colors"
@@ -366,7 +351,7 @@ export const Dashboard: React.FC<{ setActiveTab?: (tab: string) => void }> = (pr
           )) : (
             <div className="py-12 border-2 border-dashed border-white/5 rounded-3xl flex flex-col items-center justify-center text-gray-600">
               <Music2 size={32} className="mb-4 opacity-20" />
-              <p className="text-[10px] font-black uppercase tracking-widest">No beats tracked yet</p>
+              <p className="text-[10px] font-black uppercase tracking-widest">{emptyLabel}</p>
             </div>
           )}
         </div>

@@ -33,6 +33,10 @@ service cloud.firestore {
       return isSignedIn();
     }
 
+    function isAdmin() {
+      return isSignedIn() && request.auth.token.email in ['tapmadeit@gmail.com', 'prodbysean21@gmail.com', 'sanjosean96@gmail.com', 'pkwav961@gmail.com'];
+    }
+
     // --- Entities Validation ---
 
     function isValidUser(data) {
@@ -92,18 +96,38 @@ service cloud.firestore {
     // --- Collection Matches ---
 
     match /users/{userId} {
-      allow read: if true;
+      allow get: if true; 
+      allow list: if true;
       allow create: if isOwner(userId) && isValidUser(incoming());
-      allow update: if isOwner(userId) && (
+      allow update: if (isOwner(userId) && (
         incoming().diff(existing()).affectedKeys().hasOnly([
-          'displayName', 'photoURL', 'bio', 'location', 
-          'xp', 'level', 'streakCount', 'lastActivityDate', 'streakShields', 'stats'
+          'displayName', 'photoURL', 'bio', 'location', 'country', 'roles', 'role',
+          'genres', 'daw', 'skillLevel', 'socials', 'matcherEnabled', 'matcherOnboardComplete',
+          'xp', 'level', 'streakCount', 'lastActivityDate', 'streakShields', 'stats',
+          'matcherRoles', 'matcherDaw', 'matcherMusicLink', 'matcherAudioUrl', 'city',
+          'linkedAccounts', 'analytics', 'verifiedBadges', 'profileVerificationStatus', 'profileVerifiedName', 'profileVerifiedImage', 'claimedCredits'
         ])
-      );
+      )) || isAdmin();
+      allow delete: if isSignedIn();
+
+      // Spotify Credit Stats sub-collection — written by the serverless scraper (admin SDK bypasses rules)
+      // The owner can read their own stats; writes are admin-SDK only (no client write rule needed)
+      match /creditStats/{statId} {
+        allow read: if isOwner(userId);
+        allow write: if false; // Written exclusively by the server-side scraper via Admin SDK
+      }
+    }
+
+    match /pendingVerifications/{id} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin();
     }
 
     match /sessions/{sessionId} {
-      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid); 
+      allow get: if isSignedIn() && (existing().userId == request.auth.uid);
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid); 
       allow create: if isSignedIn() && (incoming().userId == request.auth.uid);
       allow update: if isSignedIn() && (existing().userId == request.auth.uid) && (
         incoming().diff(existing()).affectedKeys().hasOnly([
@@ -114,21 +138,23 @@ service cloud.firestore {
     }
 
     match /goals/{goalId} {
-      allow read: if isOwner(resource.data.userId);
+      allow get: if isOwner(existing().userId);
+      allow list: if isOwner(resource.data.userId);
       allow create: if isVerified() && isValidGoal(incoming());
-      allow update: if isOwner(resource.data.userId) && (
+      allow update: if isOwner(existing().userId) && (
         incoming().diff(existing()).affectedKeys().hasOnly(['currentValue', 'completed', 'deadline'])
       );
-      allow delete: if isOwner(resource.data.userId);
+      allow delete: if isOwner(existing().userId);
     }
 
     match /beats/{beatId} {
-      allow read: if isSignedIn();
+      allow get: if isSignedIn(); 
+      allow list: if isSignedIn();
       allow create: if isVerified() && isValidBeat(incoming());
-      allow update: if isOwner(resource.data.userId) && (
+      allow update: if isOwner(existing().userId) && (
         incoming().diff(existing()).affectedKeys().hasOnly(['title', 'genre', 'status'])
       );
-      allow delete: if isOwner(resource.data.userId);
+      allow delete: if isOwner(existing().userId);
     }
 
     match /friendships/{friendId} {

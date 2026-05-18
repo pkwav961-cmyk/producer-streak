@@ -15,6 +15,11 @@
   body {
     @apply bg-surface text-white antialiased selection:bg-primary/30 font-sans;
   }
+
+  select, option {
+    color: #000;
+    background: #fff;
+  }
 }
 
 .glass {

@@ -48,24 +48,54 @@ export interface UserProfile {
   lastActivityDate: string;
   streakShields: number;
   stats: UserStats;
-  bio: string;
-  location: string;
+  bio?: string;
+  location?: string;
   createdAt: string;
+  // Onboarding fields
+  onboardingComplete?: boolean;
+  country?: string;
+  roles?: ('producer' | 'artist' | 'engineer')[];
+  socials?: {
+    discord?: string;
+    instagram?: string;
+    tiktok?: string;
+  };
   // Matcher fields
   role?: 'producer' | 'artist' | 'engineer';
+  matcherRoles?: ('producer' | 'artist' | 'engineer')[];
   genres?: string[];
   bpmRange?: { min: number; max: number };
   daw?: string[];
+  matcherDaw?: string;
   skillLevel?: 'beginner' | 'intermediate' | 'advanced' | 'expert';
   lookingFor?: string[];
   matcherEnabled?: boolean;
+  matcherMusicLink?: string;
+  matcherAudioUrl?: string;
+  matcherOnboardComplete?: boolean;
+  city?: string;
+  
+  // Levels and Leaderboards
+  prestigeLevel?: number;
+  seasonRank?: number;
+  rankTitle?: string;
+  
+  // Analytics & Verification
+  analytics?: UserAnalytics;
+  linkedAccounts?: LinkedAccount[];
+  verifiedBadges?: string[];
+  plan?: 'free' | 'pro';
 }
 
 export interface MatcherProfile extends UserProfile {
   role: 'producer' | 'artist' | 'engineer';
+  matcherRoles?: ('producer' | 'artist' | 'engineer')[];
   genres: string[];
+  matcherDaw?: string;
   skillLevel: 'beginner' | 'intermediate' | 'advanced' | 'expert';
   location?: string;
+  city?: string;
+  country?: string;
   bio?: string;
   lastActivityDate: string;
 }
@@ -123,9 +153,13 @@ export interface Beat {
   title: string;
   audioUrl?: string;
   previewUrl?: string;
+  coverArtUrl?: string;
   fileName?: string;
   status: 'sketch' | 'finished' | 'mixed' | 'mastered';
   genre: string;
+  bpm?: number;
+  key?: string;
+  mood?: string;
   createdAt: string;
   verified: boolean;
 }
@@ -193,45 +227,48 @@ export interface FollowRelationship {
   createdAt: string;
 }
 
-// Matcher Types
-export interface MatcherProfile {
-  uid: string;
-  displayName: string;
-  photoURL: string;
-  bio: string;
-  role: 'producer' | 'artist' | 'engineer';
-  genres: string[];
-  bpmRange?: { min: number; max: number };
-  daw?: string[];
-  skillLevel: 'beginner' | 'intermediate' | 'advanced' | 'expert';
-  location?: string;
-  lastActivityDate: string;
-  lookingFor: string[];
-  stats: UserStats;
-  level: number;
-}
-
-export interface MatchSuggestion {
-  user: MatcherProfile;
-  compatibilityScore: number;
-  sharedGenres: string[];
-  matchReason: string;
-}
-
-export interface SwipeAction {
+// Verified Credits & Analytics Types
+export interface VerifiedCredit {
   id: string;
-  swiperId: string;
-  targetId: string;
-  action: 'like' | 'pass';
-  mode: 'producer' | 'artist' | 'engineer';
-  createdAt: string;
+  userId: string;
+  songTitle: string;
+  artistName: string;
+  releaseDate: string;
+  platform: 'spotify' | 'genius' | 'apple' | 'soundcloud' | 'youtube';
+  roles: string[]; // e.g. ['Producer', 'Writer', 'Engineer']
+  streams?: number;
+  artworkUrl?: string;
+  verifiedAt: string;
+  trackId?: string;
 }
 
-export interface Match {
+export interface UserAnalytics {
+  monthlyListeners: number;
+  totalStreams: number;
+  totalPlacements: number;
+  creditedSongs: number;
+  topCollabs: string[];
+  averageBpm: number;
+  topGenres: string[];
+  engagementGrowth?: number;
+  streamGrowth?: number;
+}
+
+export interface LinkedAccount {
+  platform: 'spotify' | 'genius' | 'apple' | 'soundcloud' | 'youtube' | 'instagram' | 'tiktok';
+  accountId: string;
+  username: string;
+  profileUrl?: string;
+  verifiedAt: string;
+  accessToken?: string;
+}
+
+export interface Achievement {
   id: string;
-  users: [string, string];
-  mode: 'producer' | 'artist' | 'engineer';
-  createdAt: string;
-  lastMessage?: string;
-  chatId?: string;
+  userId: string;
+  type: 'placement' | 'streams' | 'level' | 'streak';
+  title: string;
+  description: string;
+  unlockedAt: string;
+  iconName?: string;
 }

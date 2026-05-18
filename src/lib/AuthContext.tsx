@@ -1,8 +1,10 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { onAuthStateChanged, User, signOut, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile, signInAnonymously } from 'firebase/auth';
+import { onAuthStateChanged, User, signOut, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile as updateAuthProfile, GoogleAuthProvider, signInWithPopup, sendPasswordResetEmail } from 'firebase/auth';
 import { doc, setDoc, onSnapshot, getDoc, updateDoc, collection, query, where, limit, getDocs } from 'firebase/firestore';
 import { auth, db } from './firebase';
 import { UserProfile } from '../types';
+import { sendWelcomeEmail, sendAdminNewUserEmail } from './email';
+import { checkUserMilestone } from './adminEmails';
 
 interface AuthContextType {
   user: User | null;
@@ -11,9 +13,12 @@ interface AuthContextType {
   authError: string | null;
   loginWithEmail: (identifier: string, pass: string) => Promise<void>;
   signUpWithEmail: (email: string, pass: string, name: string) => Promise<void>;
+  signInWithGoogle: () => Promise<void>;
+  resetPassword: (email: string) => Promise<void>;
   logout: () => Promise<void>;
   clearError: () => void;
   updateProfile: (updates: Partial<UserProfile>) => Promise<void>;
+  isAdmin: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -23,33 +28,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
     let unsubscribeProfile: (() => void) | null = null;
     let isMounted = true;
 
-    // Safety timeout to prevent being stuck on loading screen forever
     const safetyTimeout = setTimeout(() => {
       if (isMounted && loading) {
         console.warn("Auth initialization taking too long, forcing load completion.");
         setLoading(false);
       }
-    }, 8000); // 8 seconds safety cap
+    }, 8000);
 
-    const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
+    const unsubscribeAuth = onAuthStateChanged(auth, async (currentUser) => {
       if (!isMounted) return;
 
-      if (user) {
-        setUser(user);
+      if (currentUser) {
+        setUser(currentUser);
+        const adminEmails = ['tapmadeit@gmail.com', 'prodbysean21@gmail.com', 'sanjosean96@gmail.com', 'pkwav961@gmail.com', 'visualsbn@gmail.com'];
+        setIsAdmin(adminEmails.includes(String(currentUser.email).toLowerCase()));
         
         if (unsubscribeProfile) {
           unsubscribeProfile();
           unsubscribeProfile = null;
         }
 
-        const userRef = doc(db, 'users', user.uid);
+        const userRef = doc(db, 'users', currentUser.uid);
         
-        // Use getDoc first to potentially unblock faster than onSnapshot
         try {
           const initialSnap = await getDoc(userRef);
           if (initialSnap.exists() && isMounted) {
@@ -58,14 +64,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             clearTimeout(safetyTimeout);
           }
         } catch (err: any) {
-          if (err.message?.includes('offline')) {
-            console.warn("Profile fetch: Client is currently offline, relying on cached data/snapshot.");
-          } else {
-            console.error("Initial profile fetch error:", err);
-          }
+          console.error("Initial profile fetch error:", err);
         }
 
-        // Subscribe to real-time updates for persistence
         unsubscribeProfile = onSnapshot(userRef, (snapshot) => {
           if (!isMounted) return;
           
@@ -74,15 +75,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setLoading(false);
             clearTimeout(safetyTimeout);
           } else {
-            // Profile doesn't exist, create it
             const initialProfile: Omit<UserProfile, 'uid'> = {
-              displayName: user.displayName || (user.isAnonymous ? 'Guest Producer' : 'Producer'),
-              photoURL: user.photoURL || '',
-              email: user.email || '',
+              displayName: currentUser.displayName || 'Producer',
+              photoURL: currentUser.photoURL || '',
+              email: currentUser.email || '',
               xp: 0,
               level: 1,
               streakCount: 0,
-              lastActivityDate: new Date(Date.now() - 86400000).toISOString(), // Initialize to yesterday
+              lastActivityDate: new Date(Date.now() - 86400000).toISOString(),
               streakShields: 3,
               stats: {
                 totalBeats: 0,
@@ -96,6 +96,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               },
               bio: '',
               location: '',
+              city: '',
+              country: '',
+              roles: [],
+              matcherRoles: [],
+              matcherDaw: '',
+              matcherMusicLink: '',
+              matcherAudioUrl: '',
+              matcherEnabled: false,
+              matcherOnboardComplete: false,
+              socials: { discord: '', instagram: '', tiktok: '' },
+              genres: [],
+              daw: [],
+              skillLevel: 'beginner',
               createdAt: new Date().toISOString()
             };
             
@@ -108,81 +121,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
         }, (error) => {
           console.error("Profile snapshot error:", error);
-          if (isMounted) {
-            setLoading(false);
-            clearTimeout(safetyTimeout);
-          }
+          if (isMounted) setLoading(false);
         });
       } else {
-        // Automatically sign in anonymously if not logged in
-        try {
-          await signInAnonymously(auth);
-        } catch (err: any) {
-          console.warn("Anonymous auth failed (likely disabled in console):", err.code || err);
-          
-          if (!isMounted) return;
-          
-          // Fallback to local guest mode if anonymous auth is disabled
-          const guestUid = localStorage.getItem('guest_uid') || `guest-${Math.random().toString(36).substr(2, 9)}`;
-          localStorage.setItem('guest_uid', guestUid);
-          
-          const mockUser = {
-            uid: guestUid,
-            isAnonymous: true,
-            displayName: 'Guest Producer',
-            photoURL: null,
-            email: ''
-          } as any;
-          
-          setUser(mockUser);
-          
-          // Define a default guest profile in case Firestore is unreachable
-          const defaultGuestProfile: UserProfile = {
-            uid: guestUid,
-            displayName: 'Guest Producer',
-            photoURL: null,
-            email: '',
-            xp: 0,
-            level: 1,
-            streakCount: 0,
-            lastActivityDate: new Date(Date.now() - 86400000).toISOString(),
-            streakShields: 3,
-            stats: {
-              totalBeats: 0,
-              beatsFinished: 0,
-              totalHours: 0,
-              songsRecorded: 0,
-              mixesCompleted: 0,
-              uploadsCount: 0,
-              collabsCount: 0,
-              revenueEarned: 0
-            },
-            bio: 'Local Guest Mode (Firebase Auth Restricted)',
-            location: 'Local Studio',
-            createdAt: new Date().toISOString()
-          };
-          
-          // Set local profile immediately to unblock UI
-          if (isMounted) {
-            setProfile(defaultGuestProfile);
-            setLoading(false);
-            clearTimeout(safetyTimeout);
-          }
-          
-          const userRef = doc(db, 'users', guestUid);
-          try {
-            // Attempt to fetch actual data if it exists, but don't block
-            const snap = await getDoc(userRef);
-            if (snap.exists() && isMounted) {
-              setProfile({ uid: snap.id, ...snap.data() } as UserProfile);
-            } else if (isMounted) {
-              // Try to persist but don't wait for it
-              setDoc(userRef, defaultGuestProfile).catch(e => console.warn("Could not persist guest profile to Firestore:", e.message));
-            }
-          } catch (profileErr: any) {
-            console.warn("Guest profile Firestore sync issue:", profileErr.message);
-          }
-        }
+        // Explicitly clear profile data if there is no logged-in user session
+        setUser(null);
+        setProfile(null);
+        setIsAdmin(false);
+        setLoading(false);
+        clearTimeout(safetyTimeout);
       }
     });
 
@@ -197,32 +144,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signUpWithEmail = async (email: string, pass: string, name: string) => {
     setAuthError(null);
     try {
-      // Check if username is already taken - This now works because we allowed list: true in rules
-      // (Wait for a small delay to ensure Firebase Auth is ready if needed, but not strictly required for public queries)
       const usersRef = collection(db, 'users');
       const q = query(usersRef, where('displayName', '==', name), limit(1));
-      const snapshot = await getDocs(q).catch(err => {
-        console.warn("Username check query error:", err.message);
-        return { empty: true } as any; // Fallback if query fails
-      });
+      const snapshot = await getDocs(q).catch(() => ({ empty: true } as any));
       
       if (!snapshot.empty) {
         throw new Error("This producer handle is already taken. Choose another one.");
       }
 
       const userCredential = await createUserWithEmailAndPassword(auth, email, pass);
-      await updateProfile(userCredential.user, { displayName: name });
+      await updateAuthProfile(userCredential.user, { displayName: name });
 
-      // Create the Firestore profile immediately with the correct name
       const userRef = doc(db, 'users', userCredential.user.uid);
       const initialProfile: Omit<UserProfile, 'uid'> = {
         displayName: name,
         photoURL: userCredential.user.photoURL || '',
         email: userCredential.user.email || '',
+        plan: 'free',
         xp: 0,
         level: 1,
         streakCount: 0,
-        lastActivityDate: new Date(Date.now() - 86400000).toISOString(), // Initialize to yesterday
+        lastActivityDate: new Date(Date.now() - 86400000).toISOString(),
         streakShields: 3,
         stats: {
           totalBeats: 0,
@@ -236,13 +178,104 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         },
         bio: '',
         location: '',
+        city: '',
+        country: '',
+        roles: [],
+        matcherRoles: [],
+        matcherDaw: '',
+        matcherMusicLink: '',
+        matcherAudioUrl: '',
+        matcherEnabled: false,
+        matcherOnboardComplete: false,
+        socials: { discord: '', instagram: '', tiktok: '' },
+        genres: [],
+        daw: [],
+        skillLevel: 'beginner',
         createdAt: new Date().toISOString()
       };
       await setDoc(userRef, initialProfile);
+
+      // Trigger Resend welcome & admin notifications in background!
+      sendWelcomeEmail(email, name, ['Producer']).catch(err => console.error("Welcome email failed", err));
+      sendAdminNewUserEmail({
+        email,
+        displayName: name,
+        country: 'US',
+        roles: ['Producer'],
+        genres: []
+      }).catch(err => console.error("Admin signup email failed", err));
+
+      // Check for user count milestones (1K, 5K, 10K etc.)
+      getDocs(collection(db, 'users')).then(snap => {
+        checkUserMilestone(snap.size).catch(console.error);
+      }).catch(console.error);
     } catch (error: any) {
-      console.error("Sign up failed", error);
       setAuthError(error.message || "Failed to create account.");
       throw error;
+    }
+  };
+
+  const signInWithGoogle = async () => {
+    setAuthError(null);
+    try {
+      const provider = new GoogleAuthProvider();
+      const result = await signInWithPopup(auth, provider);
+      const credentialUser = result.user;
+      const userRef = doc(db, 'users', credentialUser.uid);
+      const snap = await getDoc(userRef);
+      if (!snap.exists()) {
+        const initialProfile: Omit<UserProfile, 'uid'> = {
+          displayName: credentialUser.displayName || 'Producer',
+          photoURL: credentialUser.photoURL || '',
+          email: credentialUser.email || '',
+          plan: 'free',
+          xp: 0,
+          level: 1,
+          streakCount: 0,
+          lastActivityDate: new Date(Date.now() - 86400000).toISOString(),
+          streakShields: 3,
+          stats: {
+            totalBeats: 0,
+            beatsFinished: 0,
+            totalHours: 0,
+            songsRecorded: 0,
+            mixesCompleted: 0,
+            uploadsCount: 0,
+            collabsCount: 0,
+            revenueEarned: 0
+          },
+          bio: '',
+          location: '',
+          city: '',
+          country: '',
+          roles: [],
+          matcherRoles: [],
+          matcherDaw: '',
+          matcherMusicLink: '',
+          matcherAudioUrl: '',
+          matcherEnabled: false,
+          matcherOnboardComplete: false,
+          socials: { discord: '', instagram: '', tiktok: '' },
+          genres: [],
+          daw: [],
+          skillLevel: 'beginner',
+          createdAt: new Date().toISOString()
+        };
+        await setDoc(userRef, initialProfile);
+
+        // Trigger Resend welcome & admin notifications in background for new Google users!
+        sendWelcomeEmail(credentialUser.email || '', credentialUser.displayName || 'Producer', ['Producer']).catch(err => console.error("Welcome email failed", err));
+        sendAdminNewUserEmail({
+          email: credentialUser.email || '',
+          displayName: credentialUser.displayName || 'Producer',
+          country: 'US',
+          roles: ['Producer'],
+          genres: []
+        }).catch(err => console.error("Admin signup email failed", err));
+      }
+    } catch (err: any) {
+      setAuthError(err.message || 'Google sign-in failed');
+      throw err;
     }
   };
 
@@ -250,40 +283,54 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setAuthError(null);
     try {
       let emailToUse = identifier;
-      
-      // If it doesn't look like an email, assume it's a username
       if (!identifier.includes('@')) {
         const usersRef = collection(db, 'users');
+        // Check case-insensitive by doing a simple exact match (Firestore is case-sensitive, but we can try)
         const q = query(usersRef, where('displayName', '==', identifier), limit(1));
         const snapshot = await getDocs(q);
-        if (snapshot.empty) {
-          throw new Error("No producer found with that handle.");
-        }
+        if (snapshot.empty) throw new Error("No producer found with that handle.");
         emailToUse = snapshot.docs[0].data().email;
-        if (!emailToUse) {
-          throw new Error("This profile doesn't have an associated email for login.");
-        }
       }
-
       await signInWithEmailAndPassword(auth, emailToUse, pass);
     } catch (error: any) {
-      console.error("Login failed", error);
-      setAuthError(error.message || "Failed to sign in. Check your credentials.");
+      setAuthError(error.message || "Failed to sign in.");
+      throw error;
+    }
+  };
+
+  const resetPassword = async (email: string) => {
+    setAuthError(null);
+    try {
+      if (!email) throw new Error("Please enter your email to reset password.");
+      await sendPasswordResetEmail(auth, email);
+    } catch (error: any) {
+      setAuthError(error.message || "Failed to send reset email.");
       throw error;
     }
   };
 
   const logout = async () => {
-    await signOut(auth);
+    try {
+      setLoading(true);
+      await signOut(auth);
+      setUser(null);
+      setProfile(null);
+    } catch (error) {
+      console.error("Error signing out:", error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const clearError = () => setAuthError(null);
 
   const updateProfile = async (updates: Partial<UserProfile>) => {
-    if (!user || !profile) throw new Error('No user logged in');
-    
+    if (!user) throw new Error('No user logged in');
     const userRef = doc(db, 'users', user.uid);
-    await updateDoc(userRef, updates);
+    if (updates.displayName && auth.currentUser) {
+      await updateAuthProfile(auth.currentUser, { displayName: updates.displayName }).catch(() => {});
+    }
+    await setDoc(userRef, updates, { merge: true });
   };
 
   return (
@@ -294,9 +341,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       authError, 
       loginWithEmail, 
       signUpWithEmail, 
+      signInWithGoogle,
+      resetPassword,
       logout, 
       clearError,
-      updateProfile 
+      updateProfile,
+      isAdmin
     }}>
       {children}
     </AuthContext.Provider>
@@ -305,8 +355,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
+  if (context === undefined) throw new Error('useAuth must be used within an AuthProvider');
   return context;
 };

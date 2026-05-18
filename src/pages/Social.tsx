@@ -17,7 +17,9 @@ import {
   Clock,
   Rss,
   Activity,
-  User
+  User,
+  UserX,
+  Ban
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { db } from '../lib/firebase';
@@ -93,6 +95,54 @@ export const SocialPage: React.FC<{ setActiveTab: (tab: string) => void }> = ({ 
 
     return () => unsubscribe();
   }, [user]);
+
+  const [blockedIds, setBlockedIds] = useState<string[]>([]);
+
+  // Sync blocked users
+  useEffect(() => {
+    if (!user) return;
+    const q = query(
+      collection(db, 'blocks'),
+      where('blockerId', '==', user.uid)
+    );
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setBlockedIds(snapshot.docs.map(doc => doc.data().blockedId));
+    });
+    return () => unsubscribe();
+  }, [user]);
+
+  const handleUnfriend = async (friendshipId: string) => {
+    if (!confirm("Are you sure you want to disconnect/unfriend this creator?")) return;
+    try {
+      await deleteDoc(doc(db, 'friendships', friendshipId));
+      alert("Successfully unfriended/disconnected.");
+    } catch (err) {
+      console.error("Failed to unfriend:", err);
+      alert("Failed to unfriend. Please try again.");
+    }
+  };
+
+  const handleBlock = async (targetUid: string) => {
+    if (!confirm("Are you sure you want to block this creator? They will no longer appear in your roster, and you will not be able to message each other.")) return;
+    try {
+      // 1. Add block doc
+      await addDoc(collection(db, 'blocks'), {
+        blockerId: user?.uid,
+        blockedId: targetUid,
+        createdAt: new Date().toISOString()
+      });
+
+      // 2. Clear any existing friendships
+      const match1 = friendships.find(f => f.users.includes(targetUid));
+      if (match1) {
+        await deleteDoc(doc(db, 'friendships', match1.id));
+      }
+      alert("Creator successfully blocked.");
+    } catch (err) {
+      console.error("Failed to block creator:", err);
+      alert("Failed to block. Please try again.");
+    }
+  };
 
   // Fetch feed activities
   useEffect(() => {
@@ -175,7 +225,8 @@ export const SocialPage: React.FC<{ setActiveTab: (tab: string) => void }> = ({ 
           }
         });
 
-        setFeed(activities.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
+        const filteredActivities = activities.filter(act => !blockedIds.includes(act.userId));
+        setFeed(filteredActivities.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
       } catch (err) {
         console.error("Error fetching feed:", err);
       } finally {
@@ -184,7 +235,7 @@ export const SocialPage: React.FC<{ setActiveTab: (tab: string) => void }> = ({ 
     }
 
     fetchFeed();
-  }, [filter, followingIds]);
+  }, [filter, followingIds, blockedIds]);
   useEffect(() => {
     async function fetchProducers() {
       setLoading(true);
@@ -194,7 +245,9 @@ export const SocialPage: React.FC<{ setActiveTab: (tab: string) => void }> = ({ 
         if (filter === 'global') {
           const q = query(usersRef, orderBy('xp', 'desc'), limit(50));
           const snapshot = await getDocs(q);
-          const users = snapshot.docs.map(doc => ({ ...doc.data(), uid: doc.id }) as UserProfile);
+          const users = snapshot.docs
+            .map(doc => ({ ...doc.data(), uid: doc.id }) as UserProfile)
+            .filter(u => u.displayName && u.displayName !== 'deleted' && !u.deleted && !['Producer', 'Guest Producer', 'Guest'].includes(u.displayName.trim()));
           setProducers(users);
         } else if (filter === 'friends') {
           const acceptedFriendIds = friendships
@@ -208,7 +261,10 @@ export const SocialPage: React.FC<{ setActiveTab: (tab: string) => void }> = ({ 
             // Firestore 'in' limit is 10, for larger friend lists we'd need multiple queries
             const q = query(usersRef, where('__name__', 'in', acceptedFriendIds.slice(0, 10)));
             const snapshot = await getDocs(q);
-            setProducers(snapshot.docs.map(doc => ({ ...doc.data(), uid: doc.id }) as UserProfile));
+            setProducers(snapshot.docs
+              .map(doc => ({ ...doc.data(), uid: doc.id }) as UserProfile)
+              .filter(u => u.displayName && u.displayName !== 'deleted' && !u.deleted)
+            );
           }
         }
       } catch (err) {
@@ -283,6 +339,10 @@ export const SocialPage: React.FC<{ setActiveTab: (tab: string) => void }> = ({ 
   };
 
   const filteredProducers = producers.filter(p => 
+    !blockedIds.includes(p.uid) &&
+    p.displayName &&
+    p.displayName !== 'deleted' &&
+    !(p as any).deleted &&
     p.displayName.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
@@ -506,14 +566,32 @@ export const SocialPage: React.FC<{ setActiveTab: (tab: string) => void }> = ({ 
                                 <UserPlus size={18} />
                               </button>
                             ) : fs.status === 'pending' ? (
-                              <div className="p-3 bg-purple-500/10 text-purple-400 rounded-2xl" title="Request Sent">
+                              <button 
+                                onClick={() => handleUnfriend(fs.id)}
+                                className="p-3 bg-purple-500/10 text-purple-400 rounded-2xl hover:bg-red-500/20 hover:text-red-400 transition-all animate-pulse" 
+                                title="Cancel Request"
+                              >
                                 <Clock size={18} />
-                              </div>
+                              </button>
                             ) : (
-                              <div className="p-3 bg-emerald-500/10 text-emerald-400 rounded-2xl" title="Connected">
-                                <UserCheck size={18} />
-                              </div>
+                              <button 
+                                onClick={() => handleUnfriend(fs.id)}
+                                className="p-3 bg-emerald-500/10 text-emerald-400 rounded-2xl hover:bg-red-500/20 hover:text-red-400 transition-all group" 
+                                title="Unfriend"
+                              >
+                                <UserCheck size={18} className="group-hover:hidden" />
+                                <UserX size={18} className="hidden group-hover:block text-red-400" />
+                              </button>
                             )}
+
+                            {/* Block Button */}
+                            <button 
+                              onClick={() => handleBlock(player.uid)}
+                              className="p-3 bg-white/5 text-white/20 rounded-2xl hover:bg-red-500/10 hover:text-red-500 transition-all"
+                              title="Block Creator"
+                            >
+                              <Ban size={18} />
+                            </button>
 
                             {/* Chat Button */}
                             <button 
@@ -551,7 +629,7 @@ export const SocialPage: React.FC<{ setActiveTab: (tab: string) => void }> = ({ 
               </div>
               <div>
                 <p className="text-sm font-bold uppercase tracking-tighter">{profile.displayName}</p>
-                <p className="text-[9px] text-purple-500/60 font-bold uppercase">LEVEL {profile.level} PRODUCER</p>
+                <p className="text-[9px] text-purple-500/60 font-bold uppercase">LEVEL {profile.level} {profile.roles?.length ? profile.roles.join(', ') : profile.role || 'PRODUCER'}</p>
               </div>
            </div>
            <div className="flex items-center gap-2">
@@ -591,7 +669,7 @@ const RequestRow: React.FC<{
     fetchSender();
   }, [friendship.requestedBy]);
 
-  if (!sender) return null;
+  if (!sender || sender.deleted || sender.displayName === 'deleted') return null;
 
   return (
     <motion.div 

@@ -43,19 +43,31 @@ export const MatcherPage: React.FC = () => {
 
     setLoading(true);
     try {
-      // Get all users with matcher enabled
+      // Get all users who have enabled the Matcher
       const usersQuery = query(
         collection(db, 'users'),
         where('matcherEnabled', '==', true),
-        where('role', '==', activeMode),
-        orderBy('lastActivityDate', 'desc'),
-        limit(50)
+        limit(100)
       );
 
       const usersSnapshot = await getDocs(usersQuery);
-      const allUsers = usersSnapshot.docs
+      let allUsers = usersSnapshot.docs
         .map(doc => ({ uid: doc.id, ...doc.data() } as MatcherProfile))
-        .filter(u => u.uid !== user.uid);
+        .filter(u => {
+          if (u.uid === user.uid) return false;
+          // Ignore deleted users
+          if ((u as any).deleted || (u.displayName || '').trim().toLowerCase() === 'deleted') return false;
+          
+          const userRoles = (u.roles || u.matcherRoles || (u.role ? [u.role] : [])).map((r: string) => r.toLowerCase());
+          return userRoles.includes(activeMode.toLowerCase());
+        });
+
+      // Sort locally by last activity to avoid Firestore composite index requirements
+      allUsers.sort((a, b) => {
+        const timeA = a.lastActivityDate ? new Date(a.lastActivityDate).getTime() : 0;
+        const timeB = b.lastActivityDate ? new Date(b.lastActivityDate).getTime() : 0;
+        return timeB - timeA;
+      });
 
       // Get previous swipes to filter out
       const swipesQuery = query(
@@ -196,6 +208,18 @@ export const MatcherPage: React.FC = () => {
             text: `🎉 It's a match! You both swiped right. Start your collaboration!`,
             createdAt: serverTimestamp()
           });
+
+          // Send match email notifications asynchronously in the background
+          if (profile?.email && currentProfile?.email) {
+            import('../lib/email').then(({ sendMatchNotificationEmail, sendAdminMatchNotificationEmail }) => {
+              // 1. Notify current user
+              sendMatchNotificationEmail(profile.email, profile.displayName || 'Creator', currentProfile.displayName || 'Creator', activeMode).catch(console.error);
+              // 2. Notify matched user
+              sendMatchNotificationEmail(currentProfile.email, currentProfile.displayName || 'Creator', profile.displayName || 'Creator', activeMode).catch(console.error);
+              // 3. Notify admin
+              sendAdminMatchNotificationEmail(profile.email, profile.displayName || 'Creator', currentProfile.email, currentProfile.displayName || 'Creator').catch(console.error);
+            }).catch(console.error);
+          }
         }
       }
 

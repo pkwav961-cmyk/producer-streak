@@ -1,16 +1,22 @@
 import React from 'react';
 import { useAuth } from '../lib/AuthContext';
-import { Settings, ShieldCheck, MapPin, BadgeCheck, Edit2, X, User, Clock, Mic2, Sliders, Target } from 'lucide-react';
+import { Settings, ShieldCheck, MapPin, BadgeCheck, Edit2, X, User, Clock, Mic2, Sliders, Target, Cpu, Zap } from 'lucide-react';
+import { ContactModal } from '../components/ContactModal';
 import { motion, AnimatePresence } from 'motion/react';
+import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { storage, auth } from '../lib/firebase';
+import { updateProfile as updateAuthProfile } from 'firebase/auth';
+import { uploadToR2 } from '../lib/r2';
 import { db } from '../lib/firebase';
 import { doc, updateDoc } from 'firebase/firestore';
+import { supabase } from '../lib/supabase';
 
 import { AuthForms } from '../components/auth/AuthForms';
 
 const MatcherSetupModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const { user, profile, updateProfile } = useAuth();
   const [matcherEnabled, setMatcherEnabled] = React.useState(profile?.matcherEnabled || false);
-  const [role, setRole] = React.useState<'producer' | 'artist' | 'engineer'>(profile?.role || 'producer');
+  const [roles, setRoles] = React.useState<('producer' | 'artist' | 'engineer')[]>(profile?.roles || profile?.matcherRoles || (profile?.role ? [profile.role] : ['producer']));
   const [genres, setGenres] = React.useState<string[]>(profile?.genres || []);
   const [skillLevel, setSkillLevel] = React.useState<'beginner' | 'intermediate' | 'advanced' | 'expert'>(profile?.skillLevel || 'beginner');
   const [location, setLocation] = React.useState(profile?.location || '');
@@ -29,12 +35,13 @@ const MatcherSetupModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     try {
       await updateProfile({
         matcherEnabled,
-        role,
+        roles,
+        matcherRoles: roles,
         genres,
         skillLevel,
         location,
         bio,
-        lastActivityDate: new Date()
+        lastActivityDate: new Date().toISOString()
       });
       onClose();
     } catch (error) {
@@ -52,8 +59,14 @@ const MatcherSetupModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     );
   };
 
+  const toggleRole = (r: 'producer' | 'artist' | 'engineer') => {
+    setRoles(prev => 
+      prev.includes(r) ? prev.filter(x => x !== r) : [...prev, r]
+    );
+  };
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 max-h-[60vh] overflow-y-auto custom-scrollbar pr-2 pb-4">
       <div className="text-center">
         <h2 className="text-2xl font-black italic tracking-tight uppercase">Matcher Setup</h2>
         <p className="text-[10px] font-black uppercase tracking-widest text-gray-500 mt-1">Configure your collab profile</p>
@@ -91,9 +104,9 @@ const MatcherSetupModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                 ].map((r) => (
                   <button
                     key={r.id}
-                    onClick={() => setRole(r.id)}
+                    onClick={() => toggleRole(r.id)}
                     className={`p-3 rounded-2xl border transition-all ${
-                      role === r.id
+                      roles.includes(r.id)
                         ? 'border-purple-500/50 bg-purple-500/10'
                         : 'border-white/5 bg-white/5 hover:bg-white/10'
                     }`}
@@ -198,14 +211,49 @@ const MatcherSetupModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
 };
 
 export const ProfilePage: React.FC = () => {
-  const { user, profile, loading, logout, authError } = useAuth();
+  const { user, profile, loading, logout, authError, updateProfile } = useAuth();
   const [isEditing, setIsEditing] = React.useState(false);
+  const [isEditingName, setIsEditingName] = React.useState(false);
   const [showAuthModal, setShowAuthModal] = React.useState(false);
   const [editBio, setEditBio] = React.useState(profile?.bio || '');
+  const [nameInput, setNameInput] = React.useState(profile?.displayName || '');
   const [isSaving, setIsSaving] = React.useState(false);
   const [photoUrl, setPhotoUrl] = React.useState(profile?.photoURL || '');
   const [isUrlEditing, setIsUrlEditing] = React.useState(false);
   const [showMatcherSetup, setShowMatcherSetup] = React.useState(false);
+  const [showAboutModal, setShowAboutModal] = React.useState(false);
+  const [showTermsModal, setShowTermsModal] = React.useState(false);
+  const [showContactModal, setShowContactModal] = React.useState(false);
+
+  const handleExportAchievementsCSV = () => {
+    if (!profile) return;
+    const achievementsList = [
+      { name: 'Consistent Cooker', desc: 'Keep a 3+ day streak', status: profile.streakCount >= 3 ? 'Unlocked' : 'Locked', value: `${profile.streakCount}/3 days` },
+      { name: 'Beat Machine', desc: 'Log 5+ beats total', status: profile.stats.totalBeats >= 5 ? 'Unlocked' : 'Locked', value: `${profile.stats.totalBeats}/5 beats` },
+      { name: 'Studio Grind', desc: 'Log 10+ hours of sessions', status: profile.stats.totalHours >= 10 ? 'Unlocked' : 'Locked', value: `${profile.stats.totalHours}/10 hours` },
+      { name: 'Vocal Master', desc: 'Record 3+ vocal songs', status: (profile.stats.songsRecorded || 0) >= 3 ? 'Unlocked' : 'Locked', value: `${profile.stats.songsRecorded || 0}/3 songs` },
+      { name: 'Mix Chef', desc: 'Complete 5+ mixing sessions', status: (profile.stats.mixesCompleted || 0) >= 5 ? 'Unlocked' : 'Locked', value: `${profile.stats.mixesCompleted || 0}/5 mixes` },
+      { name: 'Verified Producer', desc: 'Connect external profiles', status: (profile.linkedAccounts?.length || 0) > 0 ? 'Unlocked' : 'Locked', value: `${profile.linkedAccounts?.length || 0} connected` },
+    ];
+
+    const headers = ['Achievement Name', 'Description', 'Status', 'Current Progress'];
+    const rows = achievementsList.map(a => [
+      a.name,
+      a.desc,
+      a.status,
+      a.value
+    ].map(field => `"${field.replace(/"/g, '""')}"`));
+
+    const csvContent = [headers.map(h => `"${h}"`).join(','), ...rows.map(r => r.join(','))].join('\n');
+    
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `producer-streak-achievements-${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const handleSavePhotoUrl = async () => {
     if (!profile) return;
@@ -221,11 +269,50 @@ export const ProfilePage: React.FC = () => {
     }
   };
 
+  const handlePhotoFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !profile) return;
+    setIsSaving(true);
+    try {
+      const safeName = `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+      const fullPath = `${profile.uid}/${safeName}`;
+      
+      const { error } = await supabase.storage.from('avatars').upload(fullPath, file, {
+        cacheControl: '3600',
+        upsert: false
+      });
+      
+      if (error) throw error;
+      
+      const { data: publicUrlData } = supabase.storage.from('avatars').getPublicUrl(fullPath);
+      const url = publicUrlData.publicUrl;
+
+      const userRef = doc(db, 'users', profile.uid);
+      await updateDoc(userRef, { photoURL: url });
+      if (auth.currentUser) {
+        await updateAuthProfile(auth.currentUser, { photoURL: url });
+      }
+      setPhotoUrl(url);
+    } catch (err) {
+      console.error('Failed to upload photo:', err);
+      alert('Failed to upload photo. Ensure you have created the "avatars" bucket in Supabase and set public read/insert policies.');
+    } finally {
+      setIsSaving(false);
+      setIsUrlEditing(false);
+    }
+  };
+
   React.useEffect(() => {
     if (!user?.isAnonymous && user?.email) {
       setShowAuthModal(false);
     }
   }, [user]);
+
+  React.useEffect(() => {
+    if (profile && !profile.matcherEnabled) {
+      setShowMatcherSetup(true);
+    }
+  }, [profile?.matcherEnabled]);
 
   // Remove handleLogin logic that used Google
 
@@ -245,13 +332,39 @@ export const ProfilePage: React.FC = () => {
     }
   };
 
-  if (loading || !profile) {
+  if (loading) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[70vh] space-y-6">
         <div className="w-16 h-16 border-4 border-purple-500/20 border-t-purple-500 rounded-full animate-spin" />
         <p className="text-[10px] font-black uppercase tracking-[0.4em] text-gray-500 animate-pulse">
           Loading Profile...
         </p>
+      </div>
+    );
+  }
+
+  if (!profile) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[70vh] space-y-6 px-6 text-center">
+        <ShieldCheck size={48} className="text-red-500" />
+        <h2 className="text-2xl font-black uppercase tracking-tight">Profile unavailable</h2>
+        <p className="text-gray-400 max-w-md">
+          We couldn't load your profile. Refresh the page or sign in again to restore your studio data.
+        </p>
+        <div className="flex flex-col sm:flex-row gap-3">
+          <button
+            onClick={() => window.location.reload()}
+            className="px-8 py-4 bg-white/5 border border-white/10 rounded-2xl text-white font-bold uppercase tracking-widest text-[10px] hover:bg-white/10 transition-all"
+          >
+            Refresh
+          </button>
+          <button
+            onClick={logout}
+            className="px-8 py-4 bg-red-500/10 border border-red-500/20 rounded-2xl text-red-300 font-bold uppercase tracking-widest text-[10px] hover:bg-red-500/20 transition-all"
+          >
+            Sign Out
+          </button>
+        </div>
       </div>
     );
   }
@@ -282,20 +395,6 @@ export const ProfilePage: React.FC = () => {
     );
   }
 
-  if (loading) return <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-6">
-    <div className="w-16 h-16 border-4 border-purple-500/20 border-t-purple-500 rounded-full animate-spin" />
-  </div>;
-
-  if (!profile) return <div className="flex flex-col items-center justify-center min-h-[60vh] text-center px-4">
-    <ShieldCheck size={32} className="text-red-500 mb-4" />
-    <h2 className="text-xl font-black uppercase tracking-widest text-white mb-2">Profile Not Found</h2>
-    <p className="text-gray-400 text-sm max-w-xs mx-auto mb-6">The app failed to load your producer profile. This could be due to a connection issue.</p>
-    <div className="flex flex-col gap-3">
-      <button onClick={() => window.location.reload()} className="px-8 py-4 gradient-bg text-white font-bold rounded-2xl text-[10px] uppercase tracking-[0.2em]">Refresh & Retry</button>
-      <button onClick={logout} className="px-8 py-4 bg-white/5 border border-white/10 text-white font-bold rounded-2xl text-[10px] uppercase tracking-[0.2em]">Sign Out</button>
-    </div>
-  </div>;
-
   return (
     <div className="space-y-12 pb-12">
       <div className="flex flex-col items-center text-center">
@@ -318,6 +417,17 @@ export const ProfilePage: React.FC = () => {
         </div>
 
         <h1 className="text-4xl font-black tracking-tighter">{profile.displayName}</h1>
+        <div className="mt-2">
+          {!isEditingName ? (
+            <button onClick={() => { setIsEditingName(true); setNameInput(profile.displayName || ''); }} className="text-[10px] uppercase font-bold text-gray-400">Edit Name</button>
+          ) : (
+            <div className="flex gap-2 items-center mt-2">
+              <input value={nameInput} onChange={(e) => setNameInput(e.target.value)} className="bg-white/5 px-3 py-2 rounded-xl text-sm" />
+              <button onClick={async () => { if (nameInput.trim()) { setIsSaving(true); await updateProfile({ displayName: nameInput.trim() }); setIsSaving(false); setIsEditingName(false); } }} className="px-3 py-2 bg-purple-600 rounded-xl text-sm">Save</button>
+              <button onClick={() => setIsEditingName(false)} className="px-2 py-2 bg-white/5 rounded-xl text-sm">Cancel</button>
+            </div>
+          )}
+        </div>
 
         <AnimatePresence>
           {isUrlEditing && (
@@ -330,19 +440,17 @@ export const ProfilePage: React.FC = () => {
                 </div>
                 <div className="p-8 space-y-8">
                   <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-gray-500">Photo URL</label>
+                    <label className="text-[10px] font-black uppercase tracking-widest text-gray-500">Upload Photo</label>
                     <input 
-                      type="url" 
-                      value={photoUrl}
-                      onChange={(e) => setPhotoUrl(e.target.value)}
-                      placeholder="https://example.com/photo.jpg"
-                      className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-purple-500/50 transition-all"
+                      type="file" 
+                      accept="image/*"
+                      onChange={handlePhotoFileSelect}
+                      className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-sm text-white focus:outline-none focus:border-purple-500/50 transition-all file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-[10px] file:font-bold file:uppercase file:tracking-widest file:bg-purple-500/20 file:text-purple-400 hover:file:bg-purple-500/30"
                     />
                   </div>
                   <div className="flex gap-4">
-                    <button onClick={() => setIsUrlEditing(false)} className="flex-1 py-4 bg-white/5 border border-white/10 text-white font-bold rounded-2xl text-[10px] uppercase tracking-widest hover:bg-white/10 transition-all">Cancel</button>
-                    <button onClick={handleSavePhotoUrl} disabled={isSaving} className="flex-[2] py-4 gradient-bg text-white font-bold rounded-2xl text-[10px] uppercase tracking-widest shadow-lg shadow-purple-500/20">
-                      {isSaving ? 'Saving...' : 'Save Photo'}
+                    <button onClick={() => setIsUrlEditing(false)} className="w-full py-4 bg-white/5 border border-white/10 text-white font-bold rounded-2xl text-[10px] uppercase tracking-widest hover:bg-white/10 transition-all">
+                      {isSaving ? 'Uploading...' : 'Cancel'}
                     </button>
                   </div>
                 </div>
@@ -489,7 +597,7 @@ export const ProfilePage: React.FC = () => {
               <div>
                 <p className="text-sm font-bold text-white">Matcher Active</p>
                 <p className="text-[10px] text-gray-400 uppercase tracking-widest">
-                  Role: {profile.role || 'Not set'} • {profile.genres?.length || 0} genres
+                  Roles: {profile.roles?.join(', ') || profile.role || 'Not set'} • {profile.genres?.length || 0} genres
                 </p>
               </div>
               <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
@@ -498,8 +606,68 @@ export const ProfilePage: React.FC = () => {
         )}
       </div>
 
-      <div className="pt-8">
-        <button onClick={logout} className="w-full py-5 bg-red-500/5 border border-red-500/10 rounded-[2.5rem] text-red-500 font-bold uppercase tracking-widest text-[10px] hover:bg-red-500/10 transition-all active:scale-[0.99]">Logout Account</button>
+      {/* FIXED: Added onClick={logout} context call here */}
+      <div className="space-y-6 pt-8 border-t border-white/5">
+        {/* Studio Resources & Legal Card */}
+        <div className="bg-[#121214] border border-white/5 rounded-[2.5rem] p-8 space-y-6">
+          <div>
+            <h3 className="text-sm font-black uppercase tracking-widest text-white">Studio Resources & Info</h3>
+            <p className="text-[9px] text-gray-500 uppercase tracking-widest font-black mt-1">Platform Details & Exporters</p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+            <button 
+              onClick={handleExportAchievementsCSV}
+              className="flex items-center justify-center gap-3 p-4 bg-white/5 border border-white/10 rounded-2xl hover:bg-white/10 transition-all font-black uppercase tracking-widest text-[9px] text-white cursor-pointer"
+            >
+              <Zap size={14} className="text-purple-400" />
+              Export Achievements
+            </button>
+
+            <button 
+              onClick={() => setShowContactModal(true)}
+              className="flex items-center justify-center gap-3 p-4 bg-white/5 border border-white/10 rounded-2xl hover:bg-white/10 transition-all font-black uppercase tracking-widest text-[9px] text-white cursor-pointer"
+            >
+              <Mic2 size={14} className="text-pink-400" />
+              Contact Support
+            </button>
+
+            <a 
+              href="https://discord.gg/7FcRFvRKB8"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-center gap-3 p-4 bg-white/5 border border-white/10 rounded-2xl hover:bg-white/10 transition-all font-black uppercase tracking-widest text-[9px] text-white cursor-pointer"
+            >
+              <svg className="w-3.5 h-3.5 fill-current text-indigo-400" viewBox="0 0 127.14 96.36">
+                <path d="M107.7,8.07A105.15,105.15,0,0,0,77.26,0a77.19,77.19,0,0,0-3.3,6.83A96.67,96.67,0,0,0,53.22,6.83,77.19,77.19,0,0,0,49.88,0,105.15,105.15,0,0,0,19.44,8.07C3.66,31.58-1.86,54.65,1,77.53A105.73,105.73,0,0,0,32,96.36a77.7,77.7,0,0,0,6.63-10.85,68.43,68.43,0,0,1-10.5-5A51.69,51.69,0,0,0,30,78.89a75.76,75.76,0,0,0,67.15,0,51.69,51.69,0,0,0,1.86,1.65,68.43,68.43,0,0,1-10.5,5,77.7,77.7,0,0,0,6.63,10.85,105.73,105.73,0,0,0,31-18.83C129,50.7,122.64,27.78,107.7,8.07ZM42.45,65.69C36.18,65.69,31,60,31,53S36.18,40.36,42.45,40.36,53.83,46,53.83,53,48.72,65.69,42.45,65.69Zm42.24,0C78.41,65.69,73.24,60,73.24,53S78.41,40.36,84.69,40.36,96.07,46,96.07,53,91,65.69,84.69,65.69Z"/>
+              </svg>
+              Join Discord
+            </a>
+            
+            <button 
+              onClick={() => setShowAboutModal(true)}
+              className="flex items-center justify-center gap-3 p-4 bg-white/5 border border-white/10 rounded-2xl hover:bg-white/10 transition-all font-black uppercase tracking-widest text-[9px] text-white cursor-pointer"
+            >
+              <Sliders size={14} className="text-blue-400" />
+              About Studio
+            </button>
+
+            <button 
+              onClick={() => setShowTermsModal(true)}
+              className="flex items-center justify-center gap-3 p-4 bg-white/5 border border-white/10 rounded-2xl hover:bg-white/10 transition-all font-black uppercase tracking-widest text-[9px] text-white cursor-pointer"
+            >
+              <ShieldCheck size={14} className="text-emerald-400" />
+              Terms & Conditions
+            </button>
+          </div>
+        </div>
+
+        <button 
+          onClick={logout} 
+          className="w-full py-5 bg-red-500/5 border border-red-500/10 rounded-[2.5rem] text-red-500 font-bold uppercase tracking-widest text-[10px] hover:bg-red-500/10 transition-all active:scale-[0.99]"
+        >
+          Logout Account
+        </button>
       </div>
 
       {/* Matcher Setup Modal */}
@@ -524,6 +692,104 @@ export const ProfilePage: React.FC = () => {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* About Modal */}
+      <AnimatePresence>
+        {showAboutModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-center justify-center p-6"
+            onClick={() => setShowAboutModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-[#121214] border border-white/10 rounded-[3rem] p-8 w-full max-w-lg overflow-hidden relative animate-in zoom-in-95 duration-200"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="absolute top-0 left-0 w-full h-1 gradient-bg" />
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-xl font-black uppercase tracking-tight italic text-transparent bg-clip-text gradient-bg">About Producer Streak</h3>
+                <button onClick={() => setShowAboutModal(false)} className="p-2 text-gray-500 hover:text-white transition-all"><X size={20} /></button>
+              </div>
+
+              <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1 custom-scrollbar text-sm text-gray-300 leading-relaxed text-left">
+                <p className="font-black text-white text-base">Producer Streak is a music networking platform for producers, artists, and engineers.</p>
+                <p>Built to help creators connect faster, share work, and get real opportunities in the music industry.</p>
+                <div className="p-4 bg-purple-500/10 border border-purple-500/20 rounded-2xl flex items-start gap-3">
+                  <span className="text-xl">🔥</span>
+                  <p className="text-xs text-purple-300 font-bold uppercase tracking-wide leading-relaxed">
+                    Built by a 13 year old producer, Staz EQ, who understands the problems upcoming creators face when trying to get noticed.
+                  </p>
+                </div>
+                <p>Producer Streak focuses on real connections, verified credits, and music data that actually matters.</p>
+                <div className="space-y-2 pt-2">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">Key Features</p>
+                  <ul className="space-y-1 text-xs list-disc list-inside text-gray-400">
+                    <li>Producer, artist, and engineer matching</li>
+                    <li>Verified credits system</li>
+                    <li>Streaming and social analytics</li>
+                    <li>Producer levels and leaderboards</li>
+                    <li>Direct networking tools</li>
+                  </ul>
+                </div>
+                <p className="text-xs font-black uppercase tracking-wider text-purple-400 pt-4">Built for the next generation of music creators.</p>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Terms & Conditions Modal */}
+      <AnimatePresence>
+        {showTermsModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-center justify-center p-6"
+            onClick={() => setShowTermsModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-[#121214] border border-white/10 rounded-[3rem] p-8 w-full max-w-lg overflow-hidden relative animate-in zoom-in-95 duration-200"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="absolute top-0 left-0 w-full h-1 gradient-bg" />
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-xl font-black uppercase tracking-tight italic text-transparent bg-clip-text gradient-bg">Terms & Conditions</h3>
+                <button onClick={() => setShowTermsModal(false)} className="p-2 text-gray-500 hover:text-white transition-all"><X size={20} /></button>
+              </div>
+
+              <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1 custom-scrollbar text-xs text-gray-400 leading-relaxed uppercase tracking-wider font-bold text-left">
+                <p className="text-white font-black text-sm">1. ACCEPTANCE OF TERMS</p>
+                <p>BY CREATING AN ACCOUNT ON PRODUCER STREAK, YOU AGREE TO THESE TERMS. WE RESERVE THE RIGHT TO MODIFY THESE TERMS AT ANY TIME.</p>
+                
+                <p className="text-white font-black text-sm">2. ELIGIBILITY & USER ACCOUNT</p>
+                <p>YOU MUST AGREE TO PROVIDE ACCURATE WORK CREDITS AND PROFILE DATA. FRAUDULENT USE OF VERIFIED BADGES OR MISREPRESENTING GENIUS CREDITS WILL RESULT IN TEMPORARY OR PERMANENT TERMINATION.</p>
+
+                <p className="text-white font-black text-sm">3. UPLOADS & INTELLECTUAL PROPERTY</p>
+                <p>YOU RETAIN ALL INTELLECTUAL PROPERTY RIGHTS TO THE BEATS AND AUDIO FILES UPLOADED. BY UPLOADING, YOU GRANT PRODUCER STREAK A LIMITED LICENSE TO STREAM AND HOST YOUR FILES FOR MATCHING PURPOSES ONLY.</p>
+
+                <p className="text-white font-black text-sm">4. COMMUNITY CONDUCT & MATCHING</p>
+                <p>SPAM SWIPING, HARASSMENT, AND UNSOLICITED OFF-TOPIC SPAM DMs ARE STRICTLY PROHIBITED. VIOLATORS WILL LOSE THEIR MATCHING SHIELDS AND PRIVILEGES.</p>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      {/* Contact Modal */}
+      <ContactModal 
+        isOpen={showContactModal} 
+        onClose={() => setShowContactModal(false)} 
+        initialEmail={profile?.email}
+        initialName={profile?.displayName}
+      />
     </div>
   );
 };

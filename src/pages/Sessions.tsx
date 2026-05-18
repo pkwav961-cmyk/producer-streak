@@ -1,18 +1,107 @@
 import React, { useEffect, useState } from 'react';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import { GlassCard } from '../components/UI';
-import { Clock, Calendar, Music2, Sliders, Mic, Layers, Trash2 } from 'lucide-react';
+import { Clock, Calendar, Music2, Sliders, Mic, Layers, Trash2, Save, Check, Download as DownloadIcon, RefreshCcw, BarChart3, MessageSquare, Share2, Play, Volume2, Lock, Unlock, Settings, Music, Plus, Eye, Send, VolumeX, Key, FileUp, Activity, CheckCircle2, FolderSync, ChevronLeft } from 'lucide-react';
 import { db, handleFirestoreError } from '../lib/firebase';
 import { collection, query, where, orderBy, onSnapshot, deleteDoc, doc, updateDoc } from 'firebase/firestore';
 import { useAuth } from '../lib/AuthContext';
 import { ProductionSession as Session, OperationType } from '../types';
-import { Save, Check, Download as DownloadIcon, RefreshCcw, BarChart3 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { exportSessionsCard } from '../lib/canvasExporter';
+
+const downloadFile = (content: string, filename: string, contentType: string) => {
+  const blob = new Blob([content], { type: contentType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+};
+
+const BpmTapper: React.FC = () => {
+  const [bpm, setBpm] = useState<number | null>(null);
+  const [taps, setTaps] = useState<number[]>([]);
+
+  const handleTap = () => {
+    const now = Date.now();
+    const newTaps = [...taps, now].filter(t => now - t < 2000);
+    setTaps(newTaps);
+
+    if (newTaps.length >= 2) {
+      const intervals = [];
+      for (let i = 1; i < newTaps.length; i++) {
+        intervals.push(newTaps[i] - newTaps[i - 1]);
+      }
+      const avgInterval = intervals.reduce((sum, val) => sum + val, 0) / intervals.length;
+      setBpm(Math.round(60000 / avgInterval));
+    }
+  };
+
+  const handleReset = () => {
+    setTaps([]);
+    setBpm(null);
+  };
+
+  return (
+    <GlassCard className="p-6 bg-gradient-to-br from-purple-950/10 to-black border border-white/10 flex flex-col items-center justify-center text-center space-y-4 rounded-3xl">
+      <div className="w-10 h-10 rounded-full bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-purple-400">
+        <Clock className="animate-pulse" size={16} />
+      </div>
+      <div>
+        <p className="text-2xl font-black">{bpm || '---'} <span className="text-xs text-gray-500 font-bold uppercase tracking-widest">BPM</span></p>
+        <p className="text-[10px] font-black uppercase tracking-widest text-gray-500 mt-1">Live BPM Tapper</p>
+      </div>
+      <div className="flex gap-2 w-full">
+        <button onClick={handleTap} className="flex-1 py-2.5 gradient-bg rounded-xl text-[10px] font-black uppercase tracking-widest text-white hover:scale-105 active:scale-95 transition-all shadow-lg shadow-purple-500/20">
+          Tap
+        </button>
+        <button onClick={handleReset} className="px-3 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-[10px] font-black uppercase tracking-widest text-gray-400 transition-all">
+          Reset
+        </button>
+      </div>
+    </GlassCard>
+  );
+};
+
+const StudioDistributionChart: React.FC<{ stats: any }> = ({ stats }) => {
+  const total = (stats.byType.production || 0) + (stats.byType.mixing || 0) + (stats.byType.recording || 0) + (stats.byType.arrangement || 0) || 1;
+  const pctProd = ((stats.byType.production || 0) / total) * 100;
+  const pctMix = ((stats.byType.mixing || 0) / total) * 105; // slightly scaled for visual height
+  const pctRec = ((stats.byType.recording || 0) / total) * 100;
+  const pctArr = ((stats.byType.arrangement || 0) / total) * 100;
+
+  return (
+    <GlassCard className="p-6 rounded-3xl">
+      <h3 className="text-[10px] font-black uppercase tracking-widest text-gray-500 mb-4">Studio Distribution</h3>
+      <div className="space-y-3">
+        {[
+          { label: 'Production', pct: pctProd, color: 'bg-purple-500', count: stats.byType.production },
+          { label: 'Mixing', pct: pctMix, color: 'bg-blue-500', count: stats.byType.mixing },
+          { label: 'Recording', pct: pctRec, color: 'bg-emerald-500', count: stats.byType.recording },
+          { label: 'Arrangement', pct: pctArr, color: 'bg-orange-500', count: stats.byType.arrangement },
+        ].map((item, i) => (
+          <div key={i} className="space-y-1">
+            <div className="flex justify-between text-[8px] font-black uppercase tracking-widest text-gray-500">
+              <span>{item.label}</span>
+              <span>{item.count} sessions ({Math.round(item.pct)}%)</span>
+            </div>
+            <div className="w-full h-1.5 bg-white/5 border border-white/10 rounded-full overflow-hidden">
+              <div className={`h-full ${item.color} rounded-full`} style={{ width: `${Math.min(item.pct, 100)}%` }} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </GlassCard>
+  );
+};
 
 export const SessionsPage: React.FC = () => {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
+  const [localNotes, setLocalNotes] = useState<Record<string, string>>({});
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [savedId, setSavedId] = useState<string | null>(null);
   const [filterType, setFilterType] = useState<string>('all');
   const [filterPeriod, setFilterPeriod] = useState<string>('all');
   const [showStats, setShowStats] = useState(false);
@@ -163,6 +252,21 @@ export const SessionsPage: React.FC = () => {
                 <DownloadIcon size={14} className="text-purple-400" />
                 JSON
               </button>
+              <button 
+                onClick={() => {
+                  const items = sessions.map(s => ({
+                    title: s.type,
+                    duration: s.durationMinutes,
+                    genre: s.notes ? s.notes.split('\n')[0] : 'Collab Session',
+                    bpm: '140'
+                  }));
+                  exportSessionsCard(items, profile?.displayName || 'Creator');
+                }} 
+                className="flex items-center gap-2 px-4 py-2 bg-pink-500/10 hover:bg-pink-500/20 border border-pink-500/30 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all text-pink-300 animate-pulse"
+              >
+                <DownloadIcon size={14} className="text-pink-400" />
+                PNG Card
+              </button>
             </>
           )}
         </div>
@@ -175,7 +279,7 @@ export const SessionsPage: React.FC = () => {
           <select 
             value={filterType}
             onChange={(e) => setFilterType(e.target.value)}
-            className="bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-purple-500/50 transition-all"
+            className="bg-[#121214] border border-white/10 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-purple-500/50 transition-all text-white cursor-pointer"
           >
             <option value="all">All Types</option>
             <option value="production">Production</option>
@@ -189,7 +293,7 @@ export const SessionsPage: React.FC = () => {
           <select 
             value={filterPeriod}
             onChange={(e) => setFilterPeriod(e.target.value)}
-            className="bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-purple-500/50 transition-all"
+            className="bg-[#121214] border border-white/10 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-purple-500/50 transition-all text-white cursor-pointer"
           >
             <option value="all">All Time</option>
             <option value="today">Today</option>
@@ -208,23 +312,32 @@ export const SessionsPage: React.FC = () => {
             exit={{ opacity: 0, height: 0 }}
             className="overflow-hidden"
           >
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-6 bg-gradient-to-br from-purple-600/10 to-blue-600/10 border border-purple-500/20 rounded-3xl">
-              <div className="text-center">
-                <p className="text-2xl font-black text-purple-400">{stats.totalSessions}</p>
-                <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Total Sessions</p>
-              </div>
-              <div className="text-center">
-                <p className="text-2xl font-black text-blue-400">{stats.totalMinutes}m</p>
-                <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Total Time</p>
-              </div>
-              <div className="text-center">
-                <p className="text-2xl font-black text-green-400">{stats.avgSession}m</p>
-                <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Avg Session</p>
-              </div>
-              <div className="text-center">
-                <p className="text-2xl font-black text-orange-400">{stats.byType.production}</p>
-                <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Production</p>
-              </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-2">
+              {/* Numeric Stats */}
+              <GlassCard className="p-6 bg-gradient-to-br from-purple-600/10 to-blue-600/10 border border-purple-500/20 rounded-3xl grid grid-cols-2 gap-4">
+                <div className="text-center">
+                  <p className="text-2xl font-black text-purple-400">{stats.totalSessions}</p>
+                  <p className="text-[9px] font-black uppercase tracking-widest text-gray-400 mt-1">Sessions</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-2xl font-black text-blue-400">{stats.totalMinutes}m</p>
+                  <p className="text-[9px] font-black uppercase tracking-widest text-gray-400 mt-1">Total Time</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-2xl font-black text-green-400">{stats.avgSession}m</p>
+                  <p className="text-[9px] font-black uppercase tracking-widest text-gray-400 mt-1">Avg Session</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-2xl font-black text-orange-400">{stats.byType.production}</p>
+                  <p className="text-[9px] font-black uppercase tracking-widest text-gray-400 mt-1">Production</p>
+                </div>
+              </GlassCard>
+
+              {/* Distribution Chart */}
+              <StudioDistributionChart stats={stats} />
+
+              {/* Live BPM Tapper */}
+              <BpmTapper />
             </div>
           </motion.div>
         )}

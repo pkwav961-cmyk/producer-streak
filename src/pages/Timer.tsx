@@ -143,22 +143,36 @@ export const TimerPage: React.FC = () => {
             </div>
             <h3 className="text-xl font-black italic tracking-tighter uppercase mb-2">End Session?</h3>
             <p className="text-gray-400 text-sm mb-8">This will save your {formatTime(seconds)} session and update your streak.</p>
-            <div className="flex gap-3">
-              <button 
-                onClick={() => setShowSaveConfirmation(false)}
-                className="flex-1 py-4 bg-white/5 border border-white/10 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-white/10 transition-all"
-              >
-                Cancel
-              </button>
+            <div className="flex flex-col gap-3">
               <button 
                 onClick={async () => {
                   setShowSaveConfirmation(false);
                   await saveSession();
+                  window.location.hash = '#beats';
+                  setTimeout(() => window.dispatchEvent(new CustomEvent('open-add-beat')), 500);
                 }}
-                className="flex-1 py-4 gradient-bg text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-purple-500/20"
+                className="w-full py-4 gradient-bg text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-purple-500/20 flex items-center justify-center gap-2 hover:scale-[1.02] transition-all"
               >
-                Save Session
+                <Music size={16} /> Save & Upload Audio
               </button>
+              
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setShowSaveConfirmation(false)}
+                  className="flex-1 py-4 bg-white/5 border border-white/10 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-white/10 transition-all"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={async () => {
+                    setShowSaveConfirmation(false);
+                    await saveSession();
+                  }}
+                  className="flex-1 py-4 bg-white/10 border border-white/20 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-white/20 transition-all"
+                >
+                  Save Only
+                </button>
+              </div>
             </div>
           </motion.div>
         </motion.div>

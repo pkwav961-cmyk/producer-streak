@@ -93,7 +93,7 @@ export const ChatPage: React.FC = () => {
       const snapshot = await getDocs(q);
       const filtered = snapshot.docs
         .map(doc => ({ ...doc.data(), uid: doc.id } as UserProfile))
-        .filter(p => p.uid !== user?.uid);
+        .filter(p => p.uid !== user?.uid && p.displayName && p.displayName !== 'deleted' && !p.deleted);
       setProducers(filtered);
     }
     fetchProducers();
@@ -193,7 +193,7 @@ export const ChatPage: React.FC = () => {
   }
 
   return (
-    <div className="fixed inset-0 top-[72px] bg-[#0a0a0a] flex flex-col md:flex-row overflow-hidden">
+    <div className="fixed inset-x-0 top-[72px] bottom-0 sm:bottom-[110px] bg-[#0a0a0a] flex flex-col md:flex-row overflow-hidden">
       {/* Sidebar */}
       <div className={cn(
         "w-full md:w-80 border-r border-white/5 flex flex-col bg-[#121214] transition-all",

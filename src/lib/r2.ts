@@ -1,8 +1,11 @@
 // R2 Upload Helper for Beat Tracker
 // Uses Cloudflare R2 public upload
 
-const R2_ENDPOINT = 'https://5f44d1beadd19dbfc73ab25c87ce005d.eu.r2.cloudflarestorage.com';
-const R2_BUCKET = 'beattracker';
+const R2_ACCOUNT_ID = import.meta.env.VITE_R2_ACCOUNT_ID;
+const R2_API_TOKEN = import.meta.env.VITE_R2_API_TOKEN;
+const R2_BUCKET = import.meta.env.VITE_R2_BUCKET || 'beattracker';
+
+const R2_ENDPOINT = `https://${R2_ACCOUNT_ID}.eu.r2.cloudflarestorage.com`;
 
 export interface R2UploadOptions {
   file: File;
@@ -17,19 +20,26 @@ export interface R2UploadResult {
 
 /**
  * Upload a file to Cloudflare R2
- * Make sure your bucket has public upload enabled in CORS settings
+ * Requires a valid R2 API token with write access.
  */
 export async function uploadToR2({
   file,
   folder,
   onProgress,
 }: R2UploadOptions): Promise<R2UploadResult> {
-  // Generate unique key
+  if (!R2_ACCOUNT_ID) {
+    throw new Error('R2 account ID is not configured. Set VITE_R2_ACCOUNT_ID.');
+  }
+  if (!R2_API_TOKEN) {
+    throw new Error('R2 API token is missing. Set VITE_R2_API_TOKEN.');
+  }
+
   const timestamp = Date.now();
   const randomStr = Math.random().toString(36).substring(7);
   const ext = file.name.slice(file.name.lastIndexOf('.')) || '';
   const fileName = `${timestamp}-${randomStr}${ext}`;
   const key = `${folder}/${fileName}`;
+  const uploadUrl = `${R2_ENDPOINT}/${R2_BUCKET}/${key}`;
 
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -45,8 +55,7 @@ export async function uploadToR2({
 
     xhr.addEventListener('load', () => {
       if (xhr.status === 200 || xhr.status === 201) {
-        const url = `${R2_ENDPOINT}/${R2_BUCKET}/${key}`;
-        resolve({ url, key });
+        resolve({ url: uploadUrl, key });
       } else {
         reject(new Error(`Upload failed with status ${xhr.status}: ${xhr.responseText}`));
       }
@@ -60,18 +69,14 @@ export async function uploadToR2({
       reject(new Error('Upload cancelled'));
     });
 
-    // Upload to R2
-    const uploadUrl = `${R2_ENDPOINT}/${R2_BUCKET}/${key}`;
     xhr.open('PUT', uploadUrl, true);
     xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
-
+    xhr.setRequestHeader('Authorization', `Bearer ${R2_API_TOKEN}`);
+    xhr.setRequestHeader('Cache-Control', 'public, max-age=31536000');
     xhr.send(file);
   });
 }
 
-/**
- * Generate a public URL for an R2 file
- */
 export function getR2Url(key: string): string {
   return `${R2_ENDPOINT}/${R2_BUCKET}/${key}`;
 }

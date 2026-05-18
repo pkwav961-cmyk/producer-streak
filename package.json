@@ -1,21 +1,23 @@
 {
   "name": "react-example",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "main": "main.js",
-  "type": "module",
+  "homepage": "./",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
-    "start": "electron .",
-    "build": "vite build",
-    "dist": "electron-builder",
+    "electron": "electron .",
+    "electron-dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && electron .\"",
+    "build": "npx rimraf release && vite build",
+    "dist": "npm run build && electron-builder",
     "preview": "vite preview",
-    "clean": "rm -rf dist server.js",
+    "clean": "npx rimraf dist release",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
     "@firebase/eslint-plugin-security-rules": "^0.0.2",
     "@google/genai": "^1.29.0",
+    "@supabase/supabase-js": "^2.105.4",
     "@tailwindcss/vite": "^4.1.14",
     "@vitejs/plugin-react": "^5.0.4",
     "clsx": "^2.1.1",
@@ -29,6 +31,7 @@
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
     "recharts": "^3.8.1",
+    "resend": "^6.12.3",
     "tailwind-merge": "^3.6.0",
     "vite": "^6.2.3"
   },
@@ -36,16 +39,31 @@
     "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",
     "autoprefixer": "^10.4.21",
-    "electron": "^42.0.1",
+    "concurrently": "^9.2.1",
+    "electron": "^42.1.0",
     "electron-builder": "^25.1.8",
     "esbuild": "^0.25.0",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
-    "vite": "^6.2.3"
+    "vite": "^6.2.3",
+    "wait-on": "^9.0.10"
   },
   "build": {
-    "appId": "com.stazeqproducerstreak",
+    "appId": "com.stazeq.producerstreak",
+    "productName": "Producer Streak",
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
     "publish": [
       {
         "provider": "github",

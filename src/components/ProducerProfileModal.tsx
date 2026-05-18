@@ -245,6 +245,47 @@ export const ProducerProfileModal: React.FC<ProducerProfileModalProps> = ({
                   ))}
                 </div>
 
+                {/* Verified Placements Cabinet */}
+                <div className="p-8 md:px-12 pb-6 border-b border-white/5">
+                   <div className="flex items-center justify-between mb-6">
+                     <h3 className="text-sm font-black italic tracking-tighter uppercase text-purple-400 flex items-center gap-2">
+                       🏆 Verified Placements ({profile.claimedCredits?.length || 0})
+                     </h3>
+                     <BadgeCheck size={16} className="text-purple-400" />
+                   </div>
+
+                   <div className="space-y-3">
+                     {profile.claimedCredits && profile.claimedCredits.length > 0 ? (
+                       profile.claimedCredits.map((credit, idx) => (
+                         <div key={idx} className="bg-white/5 border border-white/5 p-4 rounded-3xl flex items-center justify-between hover:bg-white/10 transition-all">
+                           <div className="flex items-center gap-4 min-w-0">
+                             <img 
+                               src={credit.image || "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=100"} 
+                               alt="" 
+                               className="w-12 h-12 rounded-xl object-cover border border-white/10 shrink-0" 
+                             />
+                             <div className="min-w-0 flex-1">
+                               <p className="text-sm font-bold tracking-tight text-white truncate">{credit.title}</p>
+                               <p className="text-[10px] text-purple-400 font-bold uppercase tracking-wider truncate mt-0.5">
+                                 {credit.artist} • {credit.role}
+                               </p>
+                             </div>
+                           </div>
+                           <div className="text-right shrink-0">
+                             <span className="px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                               Verified
+                             </span>
+                           </div>
+                         </div>
+                       ))
+                     ) : (
+                       <div className="text-center py-8 bg-white/[0.02] rounded-3xl border border-dashed border-white/5">
+                         <p className="text-[10px] font-black uppercase tracking-widest text-gray-600">No placements claimed yet</p>
+                       </div>
+                     )}
+                   </div>
+                </div>
+
                 {/* Recent Beats Cabinet */}
                 <div className="p-8 md:px-12 pb-12">
                    <div className="flex items-center justify-between mb-6">
