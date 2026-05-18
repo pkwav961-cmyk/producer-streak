@@ -7,6 +7,7 @@ import { db } from '../lib/firebase';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { exportCreditsCard, exportSpotlightCard } from '../lib/canvasExporter';
 import { sendCreditsVerificationEmail, sendVerificationPendingEmail } from '../lib/adminEmails';
+import { addSystemLog } from '../lib/systemLogs';
 
 const fetchGeniusPageviews = async (artistName: string) => {
   const apiKey = import.meta.env.VITE_GENIUS_API_KEY;
@@ -339,6 +340,53 @@ const fetchArtistSongsFromGenius = async (artistName: string) => {
   }
 };
 
+const CREDIT_ROLES = [
+  "Main Producer",
+  "Co-Producer",
+  "Executive Producer",
+  "Vocal Producer",
+  "Sample Maker",
+  "Composer",
+  "Songwriter",
+  "Lyricist",
+  "Arranger",
+  "Mixing Engineer",
+  "Mastering Engineer",
+  "Recording Engineer",
+  "Vocal Engineer",
+  "Instrumentalist",
+  "Session Musician",
+  "Recording Artist",
+  "Featured Artist",
+  "A&R",
+  "Sound Designer",
+  "Creative Director",
+  "Synth Programmer",
+  "Drum Programmer",
+  "Assistant Mixing Engineer",
+  "Assistant Mastering Engineer",
+  "Drum Engineer",
+  "Melody Composer",
+  "Beatmaker",
+  "Additional Producer",
+  "Orchestrator",
+  "Sound Editor",
+  "MIDI Programmer",
+  "Guitarist",
+  "Keyboardist",
+  "Bassist",
+  "Drummer",
+  "Percussionist",
+  "Vocalist",
+  "Backing Vocalist",
+  "Music Director",
+  "Post-Production Engineer",
+  "Studio Manager",
+  "Executive Director",
+  "Digital Editor",
+  "Publishing Administrator"
+];
+
 export const VerifiedProfile: React.FC = () => {
   const { profile, updateProfile, user } = useAuth();
   const [activeTab, setActiveTab] = useState<'overview' | 'spotify' | 'apple' | 'youtube' | 'tiktok' | 'instagram' | 'catalogue'>('overview');
@@ -450,6 +498,30 @@ export const VerifiedProfile: React.FC = () => {
   const [proofImage, setProofImage] = useState<string | null>(null);
   const [proofImageName, setProofImageName] = useState<string>('');
   const [claimError, setClaimError] = useState<string | null>(null);
+  const [selectedSongClaims, setSelectedSongClaims] = useState<any[]>([]);
+
+  // Custom Placement addition to queue (no search needed!)
+  const [customSongTitle, setCustomSongTitle] = useState('');
+  const [customSongArtist, setCustomSongArtist] = useState('');
+  const [customSongRole, setCustomSongRole] = useState('Main Producer');
+
+  const handleAddCustomToQueue = () => {
+    if (!customSongTitle.trim() || !customSongArtist.trim()) {
+      alert("Please enter both song title and artist name to add a custom placement.");
+      return;
+    }
+    const customItem = {
+      id: `custom_queue_${Date.now()}`,
+      title: customSongTitle.trim(),
+      artist: customSongArtist.trim(),
+      image: "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300",
+      role: customSongRole
+    };
+    setSelectedSongClaims(prev => [...prev, customItem]);
+    setCustomSongTitle('');
+    setCustomSongArtist('');
+    alert(`"${customItem.title}" by ${customItem.artist} successfully added to your Claim Queue!`);
+  };
 
   // Active credited list
   const [searchArtistQuery, setSearchArtistQuery] = useState('');
@@ -835,6 +907,34 @@ export const VerifiedProfile: React.FC = () => {
       const apiKey = import.meta.env.VITE_GENIUS_API_KEY;
 
       if (searchMode === 'song') {
+        // 1. iTunes/Apple Music Global Search (REAL, public, millions of songs, no API key required!)
+        try {
+          const itunesUrl = `https://itunes.apple.com/search?term=${encodeURIComponent(creditQuery)}&entity=song&limit=25`;
+          const response = await fetch(itunesUrl);
+          if (response.ok) {
+            const data = await response.json();
+            const tracks = data.results || [];
+            tracks.forEach((track: any) => {
+              const hiResCover = track.artworkUrl100 
+                ? track.artworkUrl100.replace('100x100bb', '400x400bb')
+                : "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300";
+              
+              results.push({
+                id: `itunes_${track.trackId}`,
+                title: track.trackName,
+                artist: track.artistName,
+                image: hiResCover,
+                source: 'Apple Music',
+                spotifyUrl: `https://open.spotify.com/search/${encodeURIComponent(track.trackName + ' ' + track.artistName)}`,
+                appleMusicUrl: track.trackViewUrl
+              });
+            });
+          }
+        } catch (err) {
+          console.error("iTunes song search failed", err);
+        }
+
+        // 2. Genius API Search
         if (apiKey) {
           try {
             const cleaned = creditQuery.replace(/[-–]/g, ' ').trim();
@@ -845,13 +945,20 @@ export const VerifiedProfile: React.FC = () => {
               const hits = data.response?.hits || [];
               hits.forEach((hit: any) => {
                 const res = hit.result;
-                results.push({
-                  id: `genius_${res.id}`,
-                  title: res.title,
-                  artist: res.primary_artist?.name,
-                  image: res.song_art_image_thumbnail_url || res.header_image_url,
-                  source: 'Genius'
-                });
+                // Avoid duplication
+                const isDuplicate = results.some(r => 
+                  r.title.toLowerCase() === res.title.toLowerCase() && 
+                  r.artist.toLowerCase() === res.primary_artist?.name.toLowerCase()
+                );
+                if (!isDuplicate) {
+                  results.push({
+                    id: `genius_${res.id}`,
+                    title: res.title,
+                    artist: res.primary_artist?.name,
+                    image: res.song_art_image_thumbnail_url || res.header_image_url,
+                    source: 'Genius'
+                  });
+                }
               });
             }
           } catch (err) {
@@ -859,6 +966,7 @@ export const VerifiedProfile: React.FC = () => {
           }
         }
 
+        // 3. Local Mock Spotify Database
         const spotifyMockDatabase = [
           { title: "Come and Go", artist: "Yeat", image: "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300" },
           { title: "Red Room", artist: "Playboi Carti", image: "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=300" },
@@ -876,15 +984,22 @@ export const VerifiedProfile: React.FC = () => {
         );
 
         matches.forEach((song, idx) => {
-          results.push({
-            id: `spotify_${idx}_${Date.now()}`,
-            title: song.title,
-            artist: song.artist,
-            image: song.image,
-            source: 'Spotify'
-          });
+          const isDuplicate = results.some(r => 
+            r.title.toLowerCase() === song.title.toLowerCase() && 
+            r.artist.toLowerCase() === song.artist.toLowerCase()
+          );
+          if (!isDuplicate) {
+            results.push({
+              id: `spotify_${idx}_${Date.now()}`,
+              title: song.title,
+              artist: song.artist,
+              image: song.image,
+              source: 'Spotify'
+            });
+          }
         });
 
+        // 4. Custom Fallback Card
         if (results.length === 0) {
           results.push({
             id: `custom_${Date.now()}`,
@@ -895,6 +1010,35 @@ export const VerifiedProfile: React.FC = () => {
           });
         }
       } else {
+        // ALBUM MODE
+        // 1. iTunes Album Search
+        try {
+          const itunesUrl = `https://itunes.apple.com/search?term=${encodeURIComponent(creditQuery)}&entity=album&limit=20`;
+          const response = await fetch(itunesUrl);
+          if (response.ok) {
+            const data = await response.json();
+            const collections = data.results || [];
+            collections.forEach((album: any) => {
+              const hiResCover = album.artworkUrl100 
+                ? album.artworkUrl100.replace('100x100bb', '400x400bb')
+                : "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300";
+              
+              results.push({
+                id: `itunes_album_${album.collectionId}`,
+                title: album.collectionName,
+                artist: album.artistName,
+                image: hiResCover,
+                source: 'Apple Music',
+                type: 'itunes_album',
+                collectionId: album.collectionId
+              });
+            });
+          }
+        } catch (err) {
+          console.error("iTunes album search failed", err);
+        }
+
+        // 2. Genius Album Search
         if (apiKey) {
           try {
             const cleaned = creditQuery.replace(/[-–]/g, ' ').trim();
@@ -905,14 +1049,20 @@ export const VerifiedProfile: React.FC = () => {
               const hits = data.response?.hits || [];
               hits.forEach((hit: any) => {
                 const res = hit.result;
-                results.push({
-                  id: res.id,
-                  title: res.title,
-                  artist: res.primary_artist?.name,
-                  image: res.song_art_image_thumbnail_url || res.header_image_url,
-                  source: 'Genius',
-                  type: 'album_candidate'
-                });
+                const isDuplicate = results.some(r => 
+                  r.title.toLowerCase() === res.title.toLowerCase() && 
+                  r.artist.toLowerCase() === res.primary_artist?.name.toLowerCase()
+                );
+                if (!isDuplicate) {
+                  results.push({
+                    id: res.id,
+                    title: res.title,
+                    artist: res.primary_artist?.name,
+                    image: res.song_art_image_thumbnail_url || res.header_image_url,
+                    source: 'Genius',
+                    type: 'album_candidate'
+                  });
+                }
               });
             }
           } catch (err) {
@@ -920,6 +1070,7 @@ export const VerifiedProfile: React.FC = () => {
           }
         }
 
+        // 3. Local Mock Albums Database
         const mockAlbums = [
           {
             id: 'astroworld',
@@ -988,15 +1139,21 @@ export const VerifiedProfile: React.FC = () => {
         });
 
         matches.forEach((album) => {
-          results.push({
-            id: `mock_${album.id}_${Date.now()}`,
-            title: album.title,
-            artist: album.artist,
-            image: album.image,
-            source: 'Spotify Catalog',
-            tracks: album.tracks,
-            type: 'mock_album'
-          });
+          const isDuplicate = results.some(r => 
+            r.title.toLowerCase() === album.title.toLowerCase() && 
+            r.artist.toLowerCase() === album.artist.toLowerCase()
+          );
+          if (!isDuplicate) {
+            results.push({
+              id: `mock_${album.id}_${Date.now()}`,
+              title: album.title,
+              artist: album.artist,
+              image: album.image,
+              source: 'Spotify Catalog',
+              tracks: album.tracks,
+              type: 'mock_album'
+            });
+          }
         });
 
         if (results.length === 0) {
@@ -1064,7 +1221,35 @@ export const VerifiedProfile: React.FC = () => {
     setFetchingAlbumTracks(true);
     setCreditSearchError(null);
     try {
-      if (albumItem.type === 'mock_album' || albumItem.type === 'custom_album') {
+      if (albumItem.type === 'itunes_album') {
+        const lookupUrl = `https://itunes.apple.com/lookup?id=${albumItem.collectionId}&entity=song`;
+        const lookupRes = await fetch(lookupUrl);
+        if (!lookupRes.ok) throw new Error("iTunes album lookup failed");
+        const lookupData = await lookupRes.json();
+        const tracksList = lookupData.results.filter((item: any) => item.wrapperType === 'track');
+
+        setSelectedAlbum({
+          title: albumItem.title,
+          artist: albumItem.artist,
+          image: albumItem.image
+        });
+
+        if (tracksList.length > 0) {
+          setAlbumTracks(tracksList.map((t: any) => ({
+            title: t.trackName,
+            artist: t.artistName,
+            image: t.artworkUrl100 ? t.artworkUrl100.replace('100x100bb', '400x400bb') : albumItem.image,
+            selected: true,
+            role: 'Main Producer',
+            spotifyUrl: `https://open.spotify.com/search/${encodeURIComponent(t.trackName + ' ' + t.artistName)}`,
+            appleMusicUrl: t.trackViewUrl
+          })));
+        } else {
+          setAlbumTracks([
+            { title: albumItem.title, artist: albumItem.artist, image: albumItem.image, selected: true, role: 'Main Producer' }
+          ]);
+        }
+      } else if (albumItem.type === 'mock_album' || albumItem.type === 'custom_album') {
         setSelectedAlbum({
           title: albumItem.title,
           artist: albumItem.artist,
@@ -1126,7 +1311,7 @@ export const VerifiedProfile: React.FC = () => {
       }
     } catch (err) {
       console.error(err);
-      setCreditSearchError("Failed to resolve Genius album. Using fallback tracklist.");
+      setCreditSearchError("Failed to resolve album. Using fallback tracklist.");
       setSelectedAlbum({
         title: albumItem.title,
         artist: albumItem.artist,
@@ -1177,6 +1362,12 @@ export const VerifiedProfile: React.FC = () => {
           profile?.email || user?.email || 'unknown',
           t.title,
           t.artist
+        ).catch(console.error);
+
+        // System log
+        addSystemLog(
+          `User ${profile?.displayName || 'Unknown Creator'} submitted bulk credit claim for "${t.title}" by ${t.artist} (${t.role})`,
+          'info'
         ).catch(console.error);
       });
 
@@ -1251,6 +1442,12 @@ export const VerifiedProfile: React.FC = () => {
         selectedClaimSong.artist
       ).catch(console.error);
 
+      // System log
+      addSystemLog(
+        `User ${profile?.displayName || 'Unknown Creator'} submitted single credit claim for "${selectedClaimSong.title}" by ${selectedClaimSong.artist} (${claimRole})`,
+        'info'
+      ).catch(console.error);
+
       const newCredit = {
         title: selectedClaimSong.title,
         artist: selectedClaimSong.artist,
@@ -1275,6 +1472,89 @@ export const VerifiedProfile: React.FC = () => {
     } catch (err) {
       console.error(err);
       setClaimError("Failed to submit verification claim. Try again.");
+    } finally {
+      setClaiming(false);
+    }
+  };
+
+  const handleBatchClaimCredits = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (selectedSongClaims.length === 0) return;
+    
+    if (!profile?.profileVerificationStatus && !proofImage) {
+      setClaimError("Verification screenshot is required to claim credits!");
+      return;
+    }
+
+    setClaiming(true);
+    setClaimError(null);
+
+    try {
+      // Create admin verification entry for each selected song
+      const batchVerifications = selectedSongClaims.map(async (song) => {
+        await addDoc(collection(db, 'pendingVerifications'), {
+          userId: profile?.uid || user?.uid || 'unknown',
+          userEmail: profile?.email || user?.email || 'unknown',
+          userName: profile?.displayName || 'Unknown Creator',
+          songTitle: song.title,
+          artistName: song.artist,
+          role: song.role || 'Main Producer',
+          imageUrl: song.image || "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300",
+          proofImage: proofImage || null,
+          status: 'pending',
+          createdAt: serverTimestamp()
+        });
+
+        // Notify admins about the verification request
+        sendVerificationPendingEmail(
+          profile?.displayName || 'Unknown Creator',
+          profile?.email || user?.email || 'unknown',
+          `Placement Credit (${song.title})`
+        ).catch(console.error);
+
+        sendCreditsVerificationEmail(
+          profile?.displayName || 'Unknown Creator',
+          profile?.email || user?.email || 'unknown',
+          song.title,
+          song.artist
+        ).catch(console.error);
+
+        // System log
+        addSystemLog(
+          `User ${profile?.displayName || 'Unknown Creator'} submitted batch credit claim for "${song.title}" by ${song.artist} (${song.role || 'Main Producer'})`,
+          'info'
+        ).catch(console.error);
+      });
+
+      await Promise.all(batchVerifications);
+
+      const newCredits = selectedSongClaims.map(song => ({
+        title: song.title,
+        artist: song.artist,
+        role: song.role || 'Main Producer',
+        releaseDate: new Date().toISOString().split('T')[0],
+        image: song.image || "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300",
+        status: 'pending_verification'
+      }));
+
+      // Filter out existing credits with same title to avoid duplicates
+      const existingCreditsFiltered = userCredits.filter(
+        c => !newCredits.some(nc => nc.title.toLowerCase() === c.title.toLowerCase())
+      );
+      const updatedCredits = [...newCredits, ...existingCreditsFiltered];
+
+      await updateProfile({
+        claimedCredits: updatedCredits
+      });
+
+      setSelectedSongClaims([]);
+      // We explicitly DO NOT clear creditQuery or creditSearchResults so search results are preserved!
+      setProofImage(null);
+      setProofImageName('');
+      alert("Credits claimed and submitted to admin for verification!");
+    } catch (err) {
+      console.error(err);
+      setClaimError("Failed to submit verification claims. Try again.");
     } finally {
       setClaiming(false);
     }
@@ -1543,7 +1823,7 @@ export const VerifiedProfile: React.FC = () => {
       </GlassCard>
 
       {/* 2. PLACEMENT & CREDITS ENTRY HUB (Directly visible Genius/Spotify Inputs) */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
         {/* Search & Claim Single Placement */}
         <div className="bg-[#0c0c0e]/60 border border-white/5 rounded-[2.5rem] p-8 space-y-6 flex flex-col justify-between shadow-xl">
@@ -1614,6 +1894,54 @@ export const VerifiedProfile: React.FC = () => {
             </button>
           </div>
         </div>
+
+        {/* Manually Add Custom Placement */}
+        <div className="bg-[#0c0c0e]/60 border border-white/5 rounded-[2.5rem] p-8 space-y-6 flex flex-col justify-between shadow-xl">
+          <div className="space-y-2">
+            <h3 className="text-sm font-black uppercase italic tracking-tight text-white flex items-center gap-2">
+              ✍️ Manually Add Placement
+            </h3>
+            <p className="text-[10px] text-gray-500 uppercase tracking-widest font-black leading-relaxed">
+              Can't find your song in the search? Type the details below to add it directly to your Claim Queue!
+            </p>
+          </div>
+          
+          <div className="space-y-3">
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={customSongTitle}
+                onChange={(e) => setCustomSongTitle(e.target.value)}
+                placeholder="Song Title (e.g. My Block)"
+                className="flex-1 bg-[#121214] border border-white/10 rounded-2xl px-3 py-3.5 text-xs font-bold text-white outline-none focus:border-purple-500/50"
+              />
+              <input
+                type="text"
+                value={customSongArtist}
+                onChange={(e) => setCustomSongArtist(e.target.value)}
+                placeholder="Artist Name"
+                className="flex-1 bg-[#121214] border border-white/10 rounded-2xl px-3 py-3.5 text-xs font-bold text-white outline-none focus:border-purple-500/50"
+              />
+            </div>
+            <div className="flex gap-2">
+              <select
+                value={customSongRole}
+                onChange={(e) => setCustomSongRole(e.target.value)}
+                className="flex-1 bg-[#121214] border border-white/10 rounded-2xl px-3 py-3 text-xs font-bold text-white outline-none focus:border-purple-500/50"
+              >
+                {CREDIT_ROLES.map(role => (
+                  <option key={role} value={role}>{role}</option>
+                ))}
+              </select>
+              <button
+                onClick={handleAddCustomToQueue}
+                className="px-4 py-3 bg-purple-600 hover:bg-purple-700 text-white font-black uppercase text-[10px] tracking-widest rounded-2xl transition-all flex items-center justify-center gap-2 font-bold shrink-0 shadow-lg shadow-purple-600/20"
+              >
+                <Plus size={14} /> Add
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* 3. SEARCH RESULTS & MODALS FLOWS */}
@@ -1621,9 +1949,25 @@ export const VerifiedProfile: React.FC = () => {
         <div className="bg-[#0c0c0e]/60 border border-white/5 rounded-[2.5rem] p-8 space-y-6 shadow-xl animate-in slide-in-from-bottom duration-300">
           <div className="flex justify-between items-center border-b border-white/5 pb-4">
             <h4 className="font-black text-white text-sm uppercase tracking-wider">Search Results ({creditSearchResults.length})</h4>
-            <button onClick={() => setCreditSearchResults([])} className="text-xs text-purple-400 hover:text-purple-300 font-bold uppercase tracking-wider">
-              Clear Results
-            </button>
+            <div className="flex gap-4">
+              {creditSearchResults.some(item => !item.type) && (
+                <button
+                  onClick={() => {
+                    const songsOnly = creditSearchResults.filter(item => !item.type);
+                    setSelectedSongClaims(prev => {
+                      const newSongs = songsOnly.filter(s => !prev.some(p => p.id === s.id)).map(s => ({ ...s, role: 'Main Producer' }));
+                      return [...prev, ...newSongs];
+                    });
+                  }}
+                  className="text-xs text-purple-400 hover:text-purple-300 font-bold uppercase tracking-wider"
+                >
+                  Select All Songs
+                </button>
+              )}
+              <button onClick={() => setCreditSearchResults([])} className="text-xs text-purple-400 hover:text-purple-300 font-bold uppercase tracking-wider">
+                Clear Results
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1643,21 +1987,148 @@ export const VerifiedProfile: React.FC = () => {
                 {item.type === 'mock_album' || item.type === 'custom_album' || item.type === 'album_candidate' ? (
                   <button
                     onClick={() => handleSelectAlbum(item)}
-                    className="px-3.5 py-2 bg-purple-600 hover:bg-purple-700 text-white text-[9px] font-black uppercase tracking-widest rounded-xl transition-all font-bold shrink-0"
+                    className="px-3.5 py-2 bg-purple-600 hover:bg-purple-700 text-white text-[9px] font-black uppercase tracking-widest rounded-xl transition-all font-bold shrink-0 animate-pulse hover:animate-none"
                   >
                     Select Album
                   </button>
                 ) : (
                   <button
-                    onClick={() => setSelectedClaimSong(item)}
-                    className="px-3.5 py-2 bg-purple-600 hover:bg-purple-700 text-white text-[9px] font-black uppercase tracking-widest rounded-xl transition-all font-bold shrink-0"
+                    onClick={() => {
+                      const isSelected = selectedSongClaims.some(s => s.id === item.id);
+                      if (isSelected) {
+                        setSelectedSongClaims(prev => prev.filter(s => s.id !== item.id));
+                      } else {
+                        setSelectedSongClaims(prev => [...prev, { ...item, role: 'Main Producer' }]);
+                      }
+                    }}
+                    className={`px-3.5 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all shrink-0 font-extrabold ${
+                      selectedSongClaims.some(s => s.id === item.id)
+                        ? 'bg-green-500/20 text-green-400 border border-green-500/30'
+                        : 'bg-purple-600/10 border border-purple-500/20 text-purple-400 hover:bg-purple-600 hover:text-white'
+                    }`}
                   >
-                    Claim Credit
+                    {selectedSongClaims.some(s => s.id === item.id) ? '✓ Added' : '+ Add to Queue'}
                   </button>
                 )}
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {selectedSongClaims.length > 0 && (
+        <div className="bg-[#0c0c0e]/60 border border-white/5 rounded-[2.5rem] p-8 space-y-6 shadow-xl animate-in slide-in-from-bottom duration-300">
+          <div className="flex justify-between items-center border-b border-white/5 pb-4">
+            <div className="flex items-center gap-3">
+              <div className="bg-purple-600/20 text-purple-400 border border-purple-500/30 p-2.5 rounded-xl">
+                <Plus size={20} />
+              </div>
+              <div>
+                <h4 className="font-black text-white text-base uppercase">Verify Batch Claims ({selectedSongClaims.length})</h4>
+                <p className="text-[10px] text-gray-500 uppercase tracking-widest font-black mt-0.5">Claim multiple producer credits at once</p>
+              </div>
+            </div>
+            <button onClick={() => setSelectedSongClaims([])} className="p-2 text-gray-500 hover:text-white">
+              <X size={18} />
+            </button>
+          </div>
+
+          <form onSubmit={handleBatchClaimCredits} className="space-y-6">
+            <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 bg-white/5 border border-white/5 p-4 rounded-2xl">
+              <div>
+                <span className="text-[9px] text-purple-400 font-black uppercase tracking-widest block">Apply Global Role</span>
+                <p className="text-[10px] text-gray-500 uppercase font-black tracking-wider mt-0.5">Apply this role to all selected tracks in one click</p>
+              </div>
+              <select
+                value={defaultBulkRole}
+                onChange={(e) => {
+                  setDefaultBulkRole(e.target.value);
+                  setSelectedSongClaims(prev => prev.map(t => ({ ...t, role: e.target.value })));
+                }}
+                className="bg-[#121214] border border-white/10 rounded-xl px-4 py-2.5 text-xs font-bold text-white outline-none focus:border-purple-500/50"
+              >
+                {CREDIT_ROLES.map(role => (
+                  <option key={role} value={role}>{role}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="max-h-72 overflow-y-auto border border-white/5 rounded-2xl bg-black/40 divide-y divide-white/5 p-2 pr-1">
+              {selectedSongClaims.map((track, i) => (
+                <div key={track.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-3 hover:bg-white/5 rounded-xl transition-all">
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <img src={track.image} alt="" className="w-10 h-10 rounded-xl object-cover border border-white/10 shrink-0" />
+                    <div className="min-w-0">
+                      <p className="font-bold text-xs truncate text-white uppercase">{track.title}</p>
+                      <p className="text-[10px] text-gray-500 truncate uppercase font-bold tracking-widest mt-0.5">{track.artist}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <select
+                      value={track.role}
+                      onChange={(e) => {
+                        const role = e.target.value;
+                        setSelectedSongClaims(prev => prev.map((t, idx) => idx === i ? { ...t, role } : t));
+                      }}
+                      className="bg-[#121214] border border-white/10 rounded-xl px-3 py-1.5 text-[10px] font-bold text-white outline-none focus:border-purple-500/50 shrink-0"
+                    >
+                      {CREDIT_ROLES.map(role => (
+                        <option key={role} value={role}>{role}</option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedSongClaims(prev => prev.filter(t => t.id !== track.id))}
+                      className="p-1.5 text-gray-500 hover:text-red-500 rounded-lg hover:bg-white/5 transition-all"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {!profile?.profileVerificationStatus && (
+              <div className="bg-white/5 border border-white/5 p-6 rounded-[2rem] space-y-4">
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-widest text-purple-400 block mb-1">
+                    Proof Screenshot (Genius credits, DAW, or Distributor)
+                  </label>
+                  <p className="text-[10px] text-gray-500 uppercase tracking-widest font-black mb-3">
+                    Required to verify claims with the admins
+                  </p>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleFileChange}
+                    className="w-full bg-[#121214] border border-white/10 rounded-2xl px-4 py-3 text-xs text-white"
+                  />
+                  {proofImageName && (
+                    <p className="text-[10px] text-purple-400 font-bold uppercase tracking-wider mt-2">
+                      📎 Selected: {proofImageName}
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {claimError && <p className="text-xs text-red-500 font-bold uppercase">{claimError}</p>}
+
+            <button
+              type="submit"
+              disabled={claiming}
+              className="w-full py-4 bg-purple-600 hover:bg-purple-700 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest transition-all font-bold flex items-center justify-center gap-2"
+            >
+              {claiming ? (
+                <>
+                  <Loader2 className="animate-spin" size={14} />
+                  Submitting claims...
+                </>
+              ) : (
+                `Submit ${selectedSongClaims.length} placement credit claim${selectedSongClaims.length > 1 ? 's' : ''}`
+              )}
+            </button>
+          </form>
         </div>
       )}
 
@@ -1690,13 +2161,9 @@ export const VerifiedProfile: React.FC = () => {
                 }}
                 className="bg-[#121214] border border-white/10 rounded-xl px-4 py-2.5 text-xs font-bold text-white outline-none focus:border-purple-500/50"
               >
-                <option value="Main Producer">Main Producer</option>
-                <option value="Co-Producer">Co-Producer</option>
-                <option value="Executive Producer">Executive Producer</option>
-                <option value="Mixing Engineer">Mixing Engineer</option>
-                <option value="Mastering Engineer">Mastering Engineer</option>
-                <option value="Vocal Engineer">Vocal Engineer</option>
-                <option value="Sample Maker">Sample Maker</option>
+                {CREDIT_ROLES.map(role => (
+                  <option key={role} value={role}>{role}</option>
+                ))}
               </select>
             </div>
 
@@ -1726,13 +2193,9 @@ export const VerifiedProfile: React.FC = () => {
                     }}
                     className="bg-[#121214] border border-white/10 rounded-xl px-3 py-1.5 text-[10px] font-bold text-white outline-none focus:border-purple-500/50 shrink-0"
                   >
-                    <option value="Main Producer">Main Producer</option>
-                    <option value="Co-Producer">Co-Producer</option>
-                    <option value="Executive Producer">Executive Producer</option>
-                    <option value="Mixing Engineer">Mixing Engineer</option>
-                    <option value="Mastering Engineer">Mastering Engineer</option>
-                    <option value="Vocal Engineer">Vocal Engineer</option>
-                    <option value="Sample Maker">Sample Maker</option>
+                    {CREDIT_ROLES.map(role => (
+                      <option key={role} value={role}>{role}</option>
+                    ))}
                   </select>
                 </div>
               ))}
@@ -1765,11 +2228,9 @@ export const VerifiedProfile: React.FC = () => {
                 onChange={(e) => setClaimRole(e.target.value)}
                 className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3.5 text-xs font-bold text-white outline-none"
               >
-                <option value="Main Producer">Main Producer</option>
-                <option value="Co-Producer">Co-Producer</option>
-                <option value="Executive Producer">Executive Producer</option>
-                <option value="Vocal Engineer">Vocal Engineer</option>
-                <option value="Sample Maker">Sample Maker</option>
+                {CREDIT_ROLES.map(role => (
+                  <option key={role} value={role}>{role}</option>
+                ))}
               </select>
             </div>
 
@@ -1871,8 +2332,8 @@ export const VerifiedProfile: React.FC = () => {
                         <div className="flex items-center gap-2">
                           <p className="font-bold text-white uppercase">{credit.title}</p>
                           {credit.status === 'pending_verification' ? (
-                            <span className="px-2 py-0.5 rounded-full bg-yellow-500/10 text-yellow-500 border border-yellow-500/20 text-[8px] font-black uppercase tracking-widest shrink-0">
-                              Pending
+                            <span className="px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-500 border border-amber-500/20 text-[8px] font-black uppercase tracking-widest shrink-0 animate-pulse">
+                              Processing Claim
                             </span>
                           ) : (
                             <span className="px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-500 border border-purple-500/20 text-[8px] font-black uppercase tracking-widest shrink-0">

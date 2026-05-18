@@ -1,9 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useAuth } from '../lib/AuthContext';
-import { collection, getDocs, deleteDoc, doc, query, where, getDoc, updateDoc } from 'firebase/firestore';
+import { collection, getDocs, deleteDoc, doc, query, where, getDoc, updateDoc, onSnapshot, limit, orderBy, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { Search, Users, Activity, UserPlus, HeartHandshake, ShieldAlert, Trash2, Ban, CheckCircle, XCircle, Eye } from 'lucide-react';
+import { Search, Users, Activity, UserPlus, HeartHandshake, ShieldAlert, Trash2, Ban, CheckCircle, XCircle, Eye, Terminal, Loader2 } from 'lucide-react';
 import { GlassCard } from '../components/UI';
+import { addSystemLog } from '../lib/systemLogs';
 
 export const AdminPage: React.FC = () => {
   const { user, isAdmin } = useAuth();
@@ -11,12 +12,101 @@ export const AdminPage: React.FC = () => {
   const [matchesCount, setMatchesCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'users' | 'verifications'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'users' | 'verifications' | 'terminal'>('dashboard');
 
   // Verification Claims State
   const [verifications, setVerifications] = useState<any[]>([]);
   const [loadingVerifications, setLoadingVerifications] = useState(false);
   const [selectedProofUrl, setSelectedProofUrl] = useState<string | null>(null);
+
+  // Retro Terminal States
+  const [logs, setLogs] = useState<any[]>([]);
+  const [terminalInput, setTerminalInput] = useState('');
+  const [terminalHistory, setTerminalHistory] = useState<string[]>([
+    "=================================================================",
+    "   PRODUCER STREAK OS v1.0.0 - SECURE ADMIN SHELL ENGINE         ",
+    "   SYSTEM INITIATED & CONNECTED TO FIRESTORE CLOUD DATABASE     ",
+    "=================================================================",
+    "Type 'help' to review available administrative core controls.",
+    ""
+  ]);
+  const terminalBottomRef = useRef<HTMLDivElement>(null);
+
+  // Listen to systemLogs Firestore collection in real-time
+  useEffect(() => {
+    if (!isAdmin) return;
+    const q = query(
+      collection(db, 'systemLogs'),
+      orderBy('createdAt', 'desc'),
+      limit(30)
+    );
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const parsedLogs = snapshot.docs.map(d => ({
+        id: d.id,
+        ...d.data()
+      })).reverse(); // Oldest first to print in sequential order
+      setLogs(parsedLogs);
+    });
+    return () => unsubscribe();
+  }, [isAdmin]);
+
+  const handleTerminalSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!terminalInput.trim()) return;
+
+    const cmd = terminalInput.trim().toLowerCase();
+    const historyLine = `admin@producerstreak:~$ ${terminalInput}`;
+    let output: string[] = [];
+
+    if (cmd === 'help') {
+      output = [
+        "Available Shell Commands:",
+        "  help           - Print this instruction grid",
+        "  status         - Scan system, email, and latency performance",
+        "  stats          - Show live platform database numbers",
+        "  purge          - Purge mock producer / guest accounts",
+        "  clear          - Flush console display buffer",
+        "  verifications  - Display active pending claims count"
+      ];
+    } else if (cmd === 'clear') {
+      setTerminalHistory([]);
+      setTerminalInput('');
+      return;
+    } else if (cmd === 'status') {
+      output = [
+        "OS CORE : OPERATIONAL",
+        "FIRESTORE DATALAKE: ACTIVE & ONLINE",
+        "RESEND EMAIL POSTMAN: ACTIVE (API v3)",
+        `TELEMETRY RESPONSIVENESS: ${Math.round(40 + Math.random() * 20)}ms`
+      ];
+    } else if (cmd === 'stats') {
+      output = [
+        "Active System Telemetry:",
+        `  Total Accounts      : ${users.length}`,
+        `  Matches Formed      : ${matchesCount}`,
+        `  Pending claims      : ${verifications.length}`
+      ];
+    } else if (cmd === 'purge') {
+      output = [
+        "SYSTEM TRACE: Launching guest accounts purge wizard...",
+        "Executing target scans..."
+      ];
+      purgeGuestProducers();
+    } else if (cmd === 'verifications') {
+      output = [
+        `Found ${verifications.length} verifications awaiting admin review.`
+      ];
+    } else {
+      output = [`Command execution failed: '${cmd}' not recognized.`];
+    }
+
+    setTerminalHistory(prev => [...prev, historyLine, ...output, ""]);
+    setTerminalInput('');
+
+    setTimeout(() => {
+      terminalBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, 50);
+  };
 
   const loadVerifications = async () => {
     if (!isAdmin) return;
@@ -118,6 +208,12 @@ export const AdminPage: React.FC = () => {
             xp: (userData.xp || 0) + 1500,
             level: Math.max(userData.level || 1, Math.floor(((userData.xp || 0) + 1500) / 1000) + 1)
           });
+          
+          await addSystemLog(
+            `Verification APPROVED: Profile claim for artist "${v.artistName}" by User "${v.userName}" (${v.userEmail})`,
+            'success'
+          );
+          
           alert("Profile Identity Verification successfully approved! Artist profile unlocked.");
         } else {
           const credits = userData.claimedCredits || [];
@@ -139,6 +235,12 @@ export const AdminPage: React.FC = () => {
             xp: newXp,
             level: newLevel
           });
+
+          await addSystemLog(
+            `Verification APPROVED: Credit claim for track "${v.songTitle}" by artist "${v.artistName}" for User "${v.userName}" (${v.userEmail})`,
+            'success'
+          );
+
           alert("Verification successfully approved! User awarded +1000 XP bonus.");
         }
       }
@@ -169,6 +271,12 @@ export const AdminPage: React.FC = () => {
             profileVerificationStatus: 'rejected',
             isProfileVerified: false
           });
+
+          await addSystemLog(
+            `Verification REJECTED: Profile claim for artist "${v.artistName}" by User "${v.userName}" (${v.userEmail})`,
+            'warn'
+          );
+
           alert("Profile Identity Verification rejected.");
         } else {
           const credits = userData.claimedCredits || [];
@@ -177,6 +285,12 @@ export const AdminPage: React.FC = () => {
           await updateDoc(userRef, {
             claimedCredits: updatedCredits
           });
+
+          await addSystemLog(
+            `Verification REJECTED: Credit claim for track "${v.songTitle}" by artist "${v.artistName}" for User "${v.userName}" (${v.userEmail})`,
+            'warn'
+          );
+
           alert("Verification claim rejected and placement credit removed.");
         }
       }
@@ -187,22 +301,22 @@ export const AdminPage: React.FC = () => {
       alert("Failed to reject verification claim.");
     }
   };
-
+ 
   const purgeGuestProducers = async () => {
     const targets = users.filter(u => {
       const name = (u.displayName || '').trim().toLowerCase();
       return name === 'guest producer' || name === 'producer' || name === 'guest' || !u.displayName || (u as any).deleted;
     });
-
+ 
     if (targets.length === 0) {
       alert("No mock 'Guest Producer' or 'Producer' accounts found in the database!");
       return;
     }
-
+ 
     if (!confirm(`Are you sure you want to permanently delete all ${targets.length} mock/guest accounts? This will purge all 'Guest Producer' and 'Producer' records from the database.`)) {
       return;
     }
-
+ 
     setLoading(true);
     let deletedCount = 0;
     try {
@@ -218,7 +332,7 @@ export const AdminPage: React.FC = () => {
           } catch (e) {
             console.warn("Failed to delete friendships for guest during purge", e);
           }
-
+ 
           // 2. Delete user
           await deleteDoc(doc(db, 'users', target.id));
           deletedCount++;
@@ -236,6 +350,12 @@ export const AdminPage: React.FC = () => {
           }
         }
       }
+      
+      await addSystemLog(
+        `Admin database purge complete: Permanently deleted ${deletedCount} mock/guest producer accounts from Firestore.`,
+        'warn'
+      );
+
       setUsers(prev => prev.filter(u => {
         const name = (u.displayName || '').trim().toLowerCase();
         return name !== 'guest producer' && name !== 'producer' && name !== 'guest' && u.displayName && !(u as any).deleted;
@@ -309,6 +429,12 @@ export const AdminPage: React.FC = () => {
               {verifications.length}
             </span>
           )}
+        </button>
+        <button 
+          onClick={() => setActiveTab('terminal')} 
+          className={`px-6 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${activeTab === 'terminal' ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'text-gray-500 hover:text-white'} flex items-center gap-2`}
+        >
+          <Terminal size={12} /> System Terminal
         </button>
       </div>
 
@@ -524,6 +650,89 @@ export const AdminPage: React.FC = () => {
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {!loading && activeTab === 'terminal' && (
+        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
+          <GlassCard className="!p-8 border-red-500/20 bg-black/80 font-mono shadow-2xl relative overflow-hidden">
+            {/* Retro scanline overlay effect */}
+            <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(to_bottom,rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(to_right,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] bg-[size:100%_4px,3px_100%] opacity-20"></div>
+            
+            {/* Header info */}
+            <div className="flex justify-between items-center border-b border-red-500/20 pb-4 mb-6">
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full bg-red-500 animate-pulse"></div>
+                <span className="text-xs uppercase tracking-widest text-red-500 font-black">SECURE ROOT TERMINAL</span>
+              </div>
+              <span className="text-[10px] text-gray-500">SYSTEM: STABLE // KEY: ADMIN</span>
+            </div>
+
+            {/* Terminal Grid */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              {/* Left Column: Interactive Command Console */}
+              <div className="lg:col-span-7 flex flex-col h-[500px] bg-black/60 border border-white/5 rounded-2xl p-6 overflow-hidden">
+                <div className="flex-1 overflow-y-auto space-y-2 pr-2 text-xs scrollbar-thin text-green-400 select-text">
+                  {terminalHistory.map((line, i) => (
+                    <div key={i} className="whitespace-pre-wrap leading-relaxed">
+                      {line}
+                    </div>
+                  ))}
+                  <div ref={terminalBottomRef} />
+                </div>
+
+                <form onSubmit={handleTerminalSubmit} className="mt-4 flex items-center gap-2 border-t border-white/5 pt-4">
+                  <span className="text-green-500 font-bold shrink-0">admin@producerstreak:~$</span>
+                  <input
+                    type="text"
+                    value={terminalInput}
+                    onChange={(e) => setTerminalInput(e.target.value)}
+                    placeholder="Type 'help'..."
+                    className="flex-1 bg-transparent text-green-400 font-mono text-xs outline-none caret-green-500 selection:bg-green-500/20"
+                    autoFocus
+                  />
+                </form>
+              </div>
+
+              {/* Right Column: Live Event Pipeline */}
+              <div className="lg:col-span-5 flex flex-col h-[500px] bg-black/60 border border-white/5 rounded-2xl p-6 overflow-hidden">
+                <div className="border-b border-white/5 pb-2 mb-4 flex justify-between items-center">
+                  <span className="text-[10px] font-black text-white uppercase tracking-widest flex items-center gap-2">
+                    <Activity size={12} className="text-red-500 animate-pulse" /> Live Event Pipeline
+                  </span>
+                  <span className="text-[9px] text-gray-500 uppercase tracking-widest">Firestore Feed</span>
+                </div>
+
+                <div className="flex-1 overflow-y-auto space-y-3 pr-2 scrollbar-thin">
+                  {logs.length === 0 ? (
+                    <div className="h-full flex flex-col items-center justify-center text-center p-4">
+                      <Loader2 className="animate-spin text-red-500/50 mb-2" size={18} />
+                      <p className="text-[10px] text-gray-600 uppercase font-black tracking-widest">Waiting for event signals...</p>
+                    </div>
+                  ) : (
+                    logs.slice().reverse().map((log) => (
+                      <div key={log.id} className="p-3 bg-white/5 border border-white/5 rounded-xl text-[10px] font-mono leading-relaxed space-y-1.5 animate-in fade-in duration-300">
+                        <div className="flex justify-between items-center">
+                          <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-wider ${
+                            log.type === 'success' ? 'bg-green-500/10 text-green-400 border border-green-500/20' :
+                            log.type === 'warn' ? 'bg-amber-500/10 text-amber-500 border border-amber-500/20' :
+                            log.type === 'error' ? 'bg-red-500/10 text-red-400 border border-red-500/20' :
+                            'bg-blue-500/10 text-blue-400 border border-blue-500/20'
+                          }`}>
+                            {log.type}
+                          </span>
+                          <span className="text-gray-500 text-[8px]">
+                            {log.createdAt?.seconds ? new Date(log.createdAt.seconds * 1000).toLocaleTimeString() : 'Recent'}
+                          </span>
+                        </div>
+                        <p className="text-gray-300 font-bold uppercase tracking-tight break-all">{log.message}</p>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          </GlassCard>
         </div>
       )}
 

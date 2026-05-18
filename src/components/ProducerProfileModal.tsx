@@ -272,9 +272,15 @@ export const ProducerProfileModal: React.FC<ProducerProfileModalProps> = ({
                              </div>
                            </div>
                            <div className="text-right shrink-0">
-                             <span className="px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest bg-purple-500/10 text-purple-400 border border-purple-500/20">
-                               Verified
-                             </span>
+                             {credit.status === 'pending_verification' ? (
+                                <span className="px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest bg-amber-500/10 text-amber-500 border border-amber-500/20 animate-pulse">
+                                  Processing Claim
+                                </span>
+                              ) : (
+                                <span className="px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                                  Verified
+                                </span>
+                              )}
                            </div>
                          </div>
                        ))

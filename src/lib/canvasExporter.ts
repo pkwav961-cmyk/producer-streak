@@ -124,7 +124,7 @@ export const exportCreditsCard = async (creditsList: CreditItem[], userName: str
         ctx.fillStyle = isPending ? '#f59e0b' : '#a855f7';
         ctx.font = '800 12px system-ui';
         ctx.textAlign = 'center';
-        ctx.fillText(isPending ? 'PENDING' : 'VERIFIED', 970, currentY + 52);
+        ctx.fillText(isPending ? 'PROCESSING CLAIM' : 'VERIFIED', 970, currentY + 52);
         ctx.textAlign = 'left'; // Reset alignment
 
         currentY += rowHeight;
