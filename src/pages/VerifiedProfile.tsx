@@ -5,7 +5,7 @@ import { useAuth } from '../lib/AuthContext';
 import { GlassCard } from '../components/UI';
 import { db } from '../lib/firebase';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import { exportCreditsCard, exportStatsCard } from '../lib/canvasExporter';
+import { exportCreditsCard, exportSpotlightCard } from '../lib/canvasExporter';
 import { sendCreditsVerificationEmail, sendVerificationPendingEmail } from '../lib/adminEmails';
 
 const fetchGeniusPageviews = async (artistName: string) => {
@@ -432,6 +432,8 @@ export const VerifiedProfile: React.FC = () => {
   const [creditQuery, setCreditQuery] = useState('');
   const [searchingCredits, setSearchingCredits] = useState(false);
   const [creditSearchResults, setCreditSearchResults] = useState<any[]>([]);
+  const [placementsPage, setPlacementsPage] = useState(1);
+  const placementsPerPage = 5;
   const [creditSearchError, setCreditSearchError] = useState<string | null>(null);
 
   // Bulk Album Import States
@@ -641,16 +643,20 @@ export const VerifiedProfile: React.FC = () => {
     }
   };
 
-  const handleExportStatsPNG = async () => {
+  const handleExportSpotlightPNG = async () => {
     try {
-      await exportStatsCard({
-        monthlyListeners: analytics.monthlyListeners || 0,
-        totalStreams: analytics.totalStreams || 0,
-        creditedSongs: userCredits.length
-      }, profile?.displayName || 'Creator');
+      const verifiedOnly = userCredits.filter((c: any) => c.status === 'verified');
+      if (verifiedOnly.length === 0) {
+        alert("You need at least 1 verified placement in your spotlight to export!");
+        return;
+      }
+      await exportSpotlightCard(
+        verifiedOnly.slice(0, 3),
+        profile?.displayName || 'Creator'
+      );
     } catch (err) {
-      console.error("Failed to export stats card", err);
-      alert("Failed to export stats. Please try again.");
+      console.error("Failed to export spotlight card", err);
+      alert("Failed to export Spotlight PNG. Please try again.");
     }
   };
 
@@ -792,6 +798,11 @@ export const VerifiedProfile: React.FC = () => {
       await updateProfile({
         claimedCredits: updatedCredits
       });
+      // Adjust page if we deleted the last item on a page
+      const totalPagesAfterDelete = Math.ceil(updatedCredits.length / placementsPerPage) || 1;
+      if (placementsPage > totalPagesAfterDelete) {
+        setPlacementsPage(totalPagesAfterDelete);
+      }
       alert("Placement successfully removed!");
     } catch (err) {
       console.error(err);
@@ -1139,13 +1150,45 @@ export const VerifiedProfile: React.FC = () => {
     }
 
     try {
+      // Create admin verification entry for each track
+      const batchImports = selectedTracks.map(async (t) => {
+        await addDoc(collection(db, 'pendingVerifications'), {
+          userId: profile?.uid || user?.uid || 'unknown',
+          userEmail: profile?.email || user?.email || 'unknown',
+          userName: profile?.displayName || 'Unknown Creator',
+          songTitle: t.title,
+          artistName: t.artist,
+          role: t.role,
+          imageUrl: t.image || "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300",
+          proofImage: null, // Bulk scanned Genius/Spotify entry
+          status: 'pending',
+          createdAt: serverTimestamp()
+        });
+
+        // Notify admins
+        sendVerificationPendingEmail(
+          profile?.displayName || 'Unknown Creator',
+          profile?.email || user?.email || 'unknown',
+          `Bulk Scanned Credit (${t.title})`
+        ).catch(console.error);
+
+        sendCreditsVerificationEmail(
+          profile?.displayName || 'Unknown Creator',
+          profile?.email || user?.email || 'unknown',
+          t.title,
+          t.artist
+        ).catch(console.error);
+      });
+
+      await Promise.all(batchImports);
+
       const newCredits = selectedTracks.map(t => ({
         title: t.title,
         artist: t.artist,
         role: t.role,
         releaseDate: new Date().toISOString().split('T')[0],
         image: t.image || "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300",
-        status: 'verified'
+        status: 'pending_verification'
       }));
 
       const existingCreditsFiltered = userCredits.filter(
@@ -1161,6 +1204,7 @@ export const VerifiedProfile: React.FC = () => {
       setAlbumTracks([]);
       setCreditQuery('');
       setCreditSearchResults([]);
+      alert("Credits claimed and submitted to admin for verification!");
     } catch (err) {
       console.error(err);
       alert("Failed to bulk import credits. Try again.");
@@ -1171,8 +1215,7 @@ export const VerifiedProfile: React.FC = () => {
     e.preventDefault();
     if (!selectedClaimSong) return;
     
-    const isProfileVerified = profile?.profileVerificationStatus === 'verified';
-    if (!isProfileVerified && !proofImage) {
+    if (!proofImage) {
       setClaimError("Verification screenshot is required to claim credit!");
       return;
     }
@@ -1181,33 +1224,32 @@ export const VerifiedProfile: React.FC = () => {
     setClaimError(null);
 
     try {
-      if (!isProfileVerified) {
-        await addDoc(collection(db, 'pendingVerifications'), {
-          userId: profile?.uid || user?.uid || 'unknown',
-          userEmail: profile?.email || user?.email || 'unknown',
-          userName: profile?.displayName || 'Unknown Creator',
-          songTitle: selectedClaimSong.title,
-          artistName: selectedClaimSong.artist,
-          role: claimRole,
-          imageUrl: selectedClaimSong.image || "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300",
-          proofImage: proofImage,
-          status: 'pending',
-          createdAt: serverTimestamp()
-        });
+      // Always require admin approval for claims
+      await addDoc(collection(db, 'pendingVerifications'), {
+        userId: profile?.uid || user?.uid || 'unknown',
+        userEmail: profile?.email || user?.email || 'unknown',
+        userName: profile?.displayName || 'Unknown Creator',
+        songTitle: selectedClaimSong.title,
+        artistName: selectedClaimSong.artist,
+        role: claimRole,
+        imageUrl: selectedClaimSong.image || "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300",
+        proofImage: proofImage,
+        status: 'pending',
+        createdAt: serverTimestamp()
+      });
 
-        // Notify admins about the verification request
-        sendVerificationPendingEmail(
-          profile?.displayName || 'Unknown Creator',
-          profile?.email || user?.email || 'unknown',
-          'Producer Credit'
-        ).catch(console.error);
-        sendCreditsVerificationEmail(
-          profile?.displayName || 'Unknown Creator',
-          profile?.email || user?.email || 'unknown',
-          selectedClaimSong.title,
-          selectedClaimSong.artist
-        ).catch(console.error);
-      }
+      // Notify admins about the verification request
+      sendVerificationPendingEmail(
+        profile?.displayName || 'Unknown Creator',
+        profile?.email || user?.email || 'unknown',
+        'Producer Credit'
+      ).catch(console.error);
+      sendCreditsVerificationEmail(
+        profile?.displayName || 'Unknown Creator',
+        profile?.email || user?.email || 'unknown',
+        selectedClaimSong.title,
+        selectedClaimSong.artist
+      ).catch(console.error);
 
       const newCredit = {
         title: selectedClaimSong.title,
@@ -1215,7 +1257,7 @@ export const VerifiedProfile: React.FC = () => {
         role: claimRole,
         releaseDate: new Date().toISOString().split('T')[0],
         image: selectedClaimSong.image || "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300",
-        status: isProfileVerified ? 'verified' : 'pending_verification'
+        status: 'pending_verification'
       };
 
       const updatedCredits = [newCredit, ...userCredits.filter(c => c.title !== newCredit.title)];
@@ -1229,6 +1271,7 @@ export const VerifiedProfile: React.FC = () => {
       setCreditSearchResults([]);
       setProofImage(null);
       setProofImageName('');
+      alert("Credit claimed! Submitted to admin for verification.");
     } catch (err) {
       console.error(err);
       setClaimError("Failed to submit verification claim. Try again.");
@@ -1467,32 +1510,23 @@ export const VerifiedProfile: React.FC = () => {
           {profile?.role || 'Gold Member'}
         </p>
 
-        <div className="w-full max-w-md border-t border-white/5 my-6 pt-6 grid grid-cols-1 sm:grid-cols-2 gap-4 text-left">
-          <div className="bg-white/5 p-4 rounded-2xl border border-white/5">
-            <span className="text-[9px] text-gray-500 font-black uppercase tracking-widest block mb-1">Email Contact</span>
-            <p className="text-xs font-bold text-gray-300 flex items-center gap-2">
-              <Mail size={13} className="text-purple-400" />
-              {profile?.businessEmail || profile?.email || 'Tapmadeit@gmail.com'}
-            </p>
-          </div>
-          
-          <div className="bg-white/5 p-4 rounded-2xl border border-white/5">
-            <span className="text-[9px] text-gray-500 font-black uppercase tracking-widest block mb-1">Top Collaborators</span>
-            <p className="text-xs font-bold text-gray-300 flex items-center gap-2">
-              <Users size={13} className="text-pink-400" />
-              {profile?.artistCollaborators || 'Sean Sanjo, tap'}
-            </p>
-          </div>
-
-          <div className="bg-white/5 p-4 rounded-2xl border border-white/5 sm:col-span-2 text-center">
-            <span className="text-[9px] text-gray-500 font-black uppercase tracking-widest block mb-1">Official Hashtag</span>
-            <p className="text-xs font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-400">
-              #stazeq #pkwav
-            </p>
+        <div className="w-full max-w-md border-t border-white/5 my-6 pt-6">
+          <div className="bg-white/5 p-6 rounded-[2rem] border border-white/5 w-full flex flex-col items-center">
+            <span className="text-[10px] text-purple-400 font-black uppercase tracking-[0.25em] block mb-4 text-center">Top Collaborators</span>
+            <div className="flex flex-wrap gap-2.5 justify-center">
+              {(profile?.artistCollaborators || 'Sean Sanjo, tap').split(',').map((collab: string, i: number) => (
+                <div key={i} className="flex items-center gap-2 bg-gradient-to-r from-purple-500/10 to-pink-500/10 border border-purple-500/20 px-4 py-2 rounded-full hover:scale-[1.05] hover:border-purple-500/40 transition-all cursor-default shadow-md">
+                  <div className="w-5 h-5 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-[9px] font-black text-white uppercase shadow-sm">
+                    {collab.trim().charAt(0) || 'C'}
+                  </div>
+                  <span className="text-xs font-extrabold text-gray-200 uppercase tracking-tight">{collab.trim()}</span>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
 
-        <div className="flex gap-4 w-full max-w-sm mt-2">
+        <div className="flex gap-4 w-full max-w-sm mt-4">
           <button
             onClick={() => setIsModalOpen(true)}
             className="flex-1 py-3.5 bg-purple-600 hover:bg-purple-700 border border-purple-500/20 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all text-white flex items-center justify-center gap-2 shadow-lg shadow-purple-500/20 hover:scale-[1.02] active:scale-[0.98]"
@@ -1500,10 +1534,10 @@ export const VerifiedProfile: React.FC = () => {
             <Link2 size={13} className="text-white" /> Connect Accounts
           </button>
           <button
-            onClick={handleExportStatsPNG}
+            onClick={handleExportSpotlightPNG}
             className="flex-1 py-3.5 bg-white/5 hover:bg-white/10 border border-white/10 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 font-bold hover:scale-[1.02] active:scale-[0.98]"
           >
-            📤 Export PNG
+            📤 Export Spotlight
           </button>
         </div>
       </GlassCard>
@@ -1764,11 +1798,17 @@ export const VerifiedProfile: React.FC = () => {
       )}
 
       {/* 4. DISCOGRAPHY SPOTLIGHT (3 spinning records grid) */}
-      {userCredits.length > 0 && (
-        <div className="space-y-4">
-          <h4 className="text-xs font-black uppercase tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-pink-400 to-purple-400 ml-1">Discography Spotlight</h4>
+      <div className="space-y-4">
+        <h4 className="text-xs font-black uppercase tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-pink-400 to-purple-400 ml-1">Discography Spotlight</h4>
+        {userCredits.filter((c: any) => c.status === 'verified').length === 0 ? (
+          <div className="bg-[#0c0c0e]/30 border border-white/5 rounded-[2rem] p-10 text-center">
+            <p className="text-[10px] text-gray-500 uppercase tracking-widest font-black">
+              No verified placements claimed yet. Submit placements below for admin verification!
+            </p>
+          </div>
+        ) : (
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-            {userCredits.slice(0, 3).map((credit: any, idx: number) => (
+            {userCredits.filter((c: any) => c.status === 'verified').slice(0, 3).map((credit: any, idx: number) => (
               <div key={idx} className="relative group overflow-hidden bg-gradient-to-br from-[#0c0c0e]/80 to-black border border-white/5 rounded-[2rem] p-6 flex flex-col items-center text-center shadow-xl hover:border-purple-500/30 transition-all hover:scale-[1.03] duration-300">
                 {/* Spinning Record Graphic */}
                 <div className="relative w-28 h-28 flex items-center justify-center mb-4">
@@ -1792,8 +1832,8 @@ export const VerifiedProfile: React.FC = () => {
               </div>
             ))}
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* 5. TRACK PLACEMENTS TABLE */}
       <div className="bg-[#0c0c0e]/60 border border-white/5 rounded-[2.5rem] p-8 space-y-6 shadow-xl">
@@ -1817,18 +1857,29 @@ export const VerifiedProfile: React.FC = () => {
                 <th className="pb-4">Song Details</th>
                 <th className="pb-4">Credit Role</th>
                 <th className="pb-4">Release Date</th>
-                <th className="pb-4">Store Presence</th>
+                <th className="pb-4">Listen/Stream</th>
                 <th className="pb-4 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
-              {userCredits.map((credit: any, i: number) => (
+              {userCredits.slice((placementsPage - 1) * placementsPerPage, placementsPage * placementsPerPage).map((credit: any, i: number) => (
                 <tr key={i} className="text-xs text-gray-300 font-bold group hover:bg-white/5 transition-all">
                   <td className="py-4">
                     <div className="flex items-center gap-3">
                       <img src={credit.image || "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=100"} alt="" className="w-9 h-9 rounded-lg object-cover border border-white/10" />
                       <div>
-                        <p className="font-bold text-white uppercase">{credit.title}</p>
+                        <div className="flex items-center gap-2">
+                          <p className="font-bold text-white uppercase">{credit.title}</p>
+                          {credit.status === 'pending_verification' ? (
+                            <span className="px-2 py-0.5 rounded-full bg-yellow-500/10 text-yellow-500 border border-yellow-500/20 text-[8px] font-black uppercase tracking-widest shrink-0">
+                              Pending
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-500 border border-purple-500/20 text-[8px] font-black uppercase tracking-widest shrink-0">
+                              Verified
+                            </span>
+                          )}
+                        </div>
                         <p className="text-[10px] text-gray-500 uppercase tracking-widest font-black mt-0.5">{credit.artist}</p>
                       </div>
                     </div>
@@ -1836,12 +1887,23 @@ export const VerifiedProfile: React.FC = () => {
                   <td className="py-4 uppercase tracking-wider text-[10px] text-purple-400 font-black">{credit.role}</td>
                   <td className="py-4 font-mono text-[10px] text-gray-500">{credit.releaseDate}</td>
                   <td className="py-4">
-                    <div className="flex items-center gap-1.5">
-                      {['spotify', 'apple', 'amazon', 'deezer', 'instagram', 'tiktok', 'youtube'].map((store) => (
-                        <span key={store} className="w-5 h-5 rounded-md bg-white/5 flex items-center justify-center text-gray-600 text-[8px] font-black uppercase tracking-wider border border-white/5">
-                          {store.slice(0, 2)}
-                        </span>
-                      ))}
+                    <div className="flex items-center gap-2">
+                      <a
+                        href={credit.spotifyUrl || `https://open.spotify.com/search/${encodeURIComponent(credit.title + ' ' + credit.artist)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-2.5 py-1.5 bg-[#1DB954]/10 hover:bg-[#1DB954]/20 border border-[#1DB954]/20 text-[#1DB954] text-[9px] font-black uppercase tracking-widest rounded-xl transition-all flex items-center gap-1 font-bold hover:scale-[1.05] active:scale-[0.95]"
+                      >
+                        🎵 Spotify
+                      </a>
+                      <a
+                        href={credit.appleMusicUrl || `https://music.apple.com/search?term=${encodeURIComponent(credit.title + ' ' + credit.artist)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-2.5 py-1.5 bg-[#FA243C]/10 hover:bg-[#FA243C]/20 border border-[#FA243C]/20 text-[#FA243C] text-[9px] font-black uppercase tracking-widest rounded-xl transition-all flex items-center gap-1 font-bold hover:scale-[1.05] active:scale-[0.95]"
+                      >
+                        🍎 Apple
+                      </a>
                     </div>
                   </td>
                   <td className="py-4 text-right">
@@ -1857,6 +1919,31 @@ export const VerifiedProfile: React.FC = () => {
             </tbody>
           </table>
         </div>
+
+        {/* Pagination Buttons */}
+        {userCredits.length > placementsPerPage && (
+          <div className="flex items-center justify-between border-t border-white/5 pt-6 mt-4">
+            <p className="text-[10px] text-gray-500 uppercase tracking-widest font-black">
+              Page {placementsPage} of {Math.ceil(userCredits.length / placementsPerPage)}
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setPlacementsPage(p => Math.max(1, p - 1))}
+                disabled={placementsPage === 1}
+                className="px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 disabled:opacity-30 disabled:hover:bg-white/5 text-white text-[10px] font-black uppercase tracking-widest rounded-xl transition-all font-bold"
+              >
+                Previous
+              </button>
+              <button
+                onClick={() => setPlacementsPage(p => Math.min(Math.ceil(userCredits.length / placementsPerPage), p + 1))}
+                disabled={placementsPage === Math.ceil(userCredits.length / placementsPerPage)}
+                className="px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 disabled:opacity-30 disabled:hover:bg-white/5 text-white text-[10px] font-black uppercase tracking-widest rounded-xl transition-all font-bold"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* CONNECTIONS MODAL (Muso.ai setup style) */}

@@ -35,83 +35,104 @@ const loadImage = (src: string): Promise<HTMLImageElement> => {
 };
  
 export const exportCreditsCard = async (creditsList: CreditItem[], userName: string) => {
-  const canvas = document.createElement('canvas');
-  canvas.width = 1200;
-  
-  const items = creditsList; // display all items
-  const startY = 370;
-  const rowHeight = 135;
-  const footerPadding = 150;
-  const computedHeight = startY + (items.length || 1) * rowHeight + footerPadding;
-  const height = Math.max(1200, computedHeight);
-  canvas.height = height;
+  const itemsPerPage = 6;
+  const totalPages = Math.ceil(creditsList.length / itemsPerPage) || 1;
 
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return;
- 
-  // Render Template
-  drawCardTemplate(ctx, 'Verified Placement Credits', 'Officially verified producer credits catalog', userName, height);
-  
-  // Pre-load cover images
-  const loadedImages = await Promise.all(
-    items.map(item => loadImage(item.image || "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=100"))
-  );
- 
-  let currentY = startY;
- 
-  if (items.length === 0) {
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
-    ctx.font = 'italic bold 28px system-ui';
-    ctx.fillText('NO VERIFIED PLACEMENTS CLAIMED YET.', 100, currentY + 100);
-  } else {
-    items.forEach((credit, idx) => {
-      // Draw background row glass panel
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.02)';
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.roundRect(100, currentY, 1000, 110, 20);
-      ctx.fill();
-      ctx.stroke();
- 
-      // Numbering
-      ctx.fillStyle = '#ec4899';
-      ctx.font = 'italic 32px system-ui';
-      const numStr = idx + 1 < 10 ? `0${idx + 1}` : `${idx + 1}`;
-      ctx.fillText(numStr, 130, currentY + 65);
- 
-      // Cover Art Image
-      const img = loadedImages[idx];
-      if (img) {
-        ctx.save();
+  for (let page = 0; page < totalPages; page++) {
+    const pageItems = creditsList.slice(page * itemsPerPage, (page + 1) * itemsPerPage);
+    const canvas = document.createElement('canvas');
+    canvas.width = 1200;
+    
+    const startY = 370;
+    const rowHeight = 115;
+    const footerPadding = 150;
+    const computedHeight = startY + 6 * rowHeight + footerPadding;
+    const height = Math.max(1200, computedHeight);
+    canvas.height = height;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) continue;
+
+    // Render Template
+    const pageSubtitle = totalPages > 1 
+      ? `Officially verified producer credits catalog • Card ${page + 1} of ${totalPages}`
+      : 'Officially verified producer credits catalog';
+    drawCardTemplate(ctx, 'Verified Placement Credits', pageSubtitle, userName, height);
+    
+    // Pre-load cover images
+    const loadedImages = await Promise.all(
+      pageItems.map(item => loadImage(item.image || "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=100"))
+    );
+
+    let currentY = startY;
+
+    if (pageItems.length === 0) {
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+      ctx.font = 'italic bold 28px system-ui';
+      ctx.fillText('NO VERIFIED PLACEMENTS CLAIMED YET.', 100, currentY + 100);
+    } else {
+      pageItems.forEach((credit, idx) => {
+        const globalIdx = page * itemsPerPage + idx;
+
+        // Draw background row glass panel
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.02)';
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+        ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.roundRect(190, currentY + 20, 70, 70, 12);
-        ctx.clip();
-        ctx.drawImage(img, 190, currentY + 20, 70, 70);
-        ctx.restore();
-      }
- 
-      // Song Title
-      ctx.fillStyle = '#ffffff';
-      ctx.font = '800 26px system-ui';
-      ctx.fillText(credit.title.toUpperCase(), 285, currentY + 50);
- 
-      // Artist & Role
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-      ctx.font = 'bold 15px system-ui';
-      ctx.fillText(`${credit.artist.toUpperCase()} • ${credit.role.toUpperCase()}`, 285, currentY + 80);
- 
-      // Verified / Pending status
-      const isPending = credit.status === 'pending_verification';
-      ctx.fillStyle = isPending ? '#f59e0b' : '#3b82f6';
-      ctx.font = '800 20px system-ui';
-      ctx.fillText(isPending ? 'PENDING' : 'VERIFIED', 930, currentY + 65);
- 
-      currentY += rowHeight;
-    });
+        ctx.roundRect(100, currentY, 1000, 95, 20);
+        ctx.fill();
+        ctx.stroke();
+
+        // Numbering
+        ctx.fillStyle = '#ec4899';
+        ctx.font = 'italic bold 28px system-ui';
+        const numStr = (globalIdx + 1) < 10 ? `0${globalIdx + 1}` : `${globalIdx + 1}`;
+        ctx.fillText(numStr, 130, currentY + 56);
+
+        // Cover Art Image
+        const img = loadedImages[idx];
+        if (img) {
+          ctx.save();
+          ctx.beginPath();
+          ctx.roundRect(190, currentY + 15, 65, 65, 12);
+          ctx.clip();
+          ctx.drawImage(img, 190, currentY + 15, 65, 65);
+          ctx.restore();
+        }
+
+        // Song Title
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '800 24px system-ui';
+        ctx.fillText(credit.title.toUpperCase(), 280, currentY + 44);
+
+        // Artist & Role
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+        ctx.font = 'bold 14px system-ui';
+        ctx.fillText(`${credit.artist.toUpperCase()} • ${credit.role.toUpperCase()}`, 280, currentY + 72);
+
+        // Verified / Pending status pill
+        const isPending = credit.status === 'pending_verification';
+        
+        ctx.fillStyle = isPending ? 'rgba(245, 158, 11, 0.05)' : 'rgba(168, 85, 247, 0.05)';
+        ctx.strokeStyle = isPending ? 'rgba(245, 158, 11, 0.2)' : 'rgba(168, 85, 247, 0.2)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.roundRect(880, currentY + 30, 180, 35, 18);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = isPending ? '#f59e0b' : '#a855f7';
+        ctx.font = '800 12px system-ui';
+        ctx.textAlign = 'center';
+        ctx.fillText(isPending ? 'PENDING' : 'VERIFIED', 970, currentY + 52);
+        ctx.textAlign = 'left'; // Reset alignment
+
+        currentY += rowHeight;
+      });
+    }
+
+    triggerDownload(canvas, `${userName.replace(/\s+/g, '-')}-credits-card-${page + 1}.png`);
   }
- 
-  triggerDownload(canvas, `${userName.replace(/\s+/g, '-')}-credits.png`);
 };
 
 interface LeaderboardUser {
@@ -333,10 +354,7 @@ export const exportLeaderboardCard = (rankings: LeaderboardUser[], userName: str
   triggerDownload(canvas, `${userName.replace(/\s+/g, '-')}-leaderboard.png`);
 };
 
-export const exportStatsCard = async (
-  stats: { monthlyListeners: number; totalStreams: number; creditedSongs: number },
-  userName: string
-) => {
+export const exportSpotlightCard = async (creditsList: CreditItem[], userName: string) => {
   const canvas = document.createElement('canvas');
   canvas.width = 1200;
   canvas.height = 1200;
@@ -345,38 +363,94 @@ export const exportStatsCard = async (
   if (!ctx) return;
 
   // Render Template
-  drawCardTemplate(ctx, 'Official Platform Stats', 'Spotify & Genius placement analytics summary', userName, 1200);
+  drawCardTemplate(ctx, 'Discography Spotlight', 'Top verified music placements spotlight roster', userName, 1200);
 
-  // Draw big beautiful glass stats panel
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.02)';
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.roundRect(100, 380, 1000, 620, 30);
-  ctx.fill();
-  ctx.stroke();
+  // Pre-load cover images
+  const loadedImages = await Promise.all(
+    creditsList.map(item => loadImage(item.image || "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=200"))
+  );
 
-  // Glow effect draw helper for 3 stats:
-  const drawStatCol = (title: string, value: string, iconColor: string, x: number, y: number) => {
-    // Stat label
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-    ctx.font = 'bold 22px system-ui';
-    ctx.fillText(title.toUpperCase(), x, y);
+  const startX = 120;
+  const colWidth = 280;
+  const spacing = 60;
+  const recordY = 600;
 
-    // Glow effect for stat value
-    ctx.shadowColor = iconColor;
-    ctx.shadowBlur = 30;
-    ctx.fillStyle = value === '0' || value === '' ? 'rgba(255, 255, 255, 0.2)' : iconColor;
-    ctx.font = 'italic 800 80px system-ui';
-    ctx.fillText(value, x, y + 90);
+  creditsList.forEach((credit, idx) => {
+    const x = startX + idx * (colWidth + spacing) + colWidth / 2;
 
-    // Reset shadow
-    ctx.shadowBlur = 0;
-  };
+    // 1. Draw vinyl back-glow
+    const glowGrad = ctx.createRadialGradient(x, recordY, 10, x, recordY, 160);
+    glowGrad.addColorStop(0, 'rgba(168, 85, 247, 0.15)');
+    glowGrad.addColorStop(0.5, 'rgba(236, 72, 153, 0.05)');
+    glowGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = glowGrad;
+    ctx.beginPath();
+    ctx.arc(x, recordY, 160, 0, Math.PI * 2);
+    ctx.fill();
 
-  drawStatCol('Monthly Listeners', stats.monthlyListeners.toLocaleString(), '#1db954', 150, 480);
-  drawStatCol('Total Streams', stats.totalStreams.toLocaleString(), '#3b82f6', 150, 680);
-  drawStatCol('Verified Placements', stats.creditedSongs.toString(), '#a855f7', 150, 880);
+    // 2. Draw Vinyl Outer Disc (Charcoal circle)
+    ctx.fillStyle = '#111113';
+    ctx.strokeStyle = '#1d1d21';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(x, recordY, 130, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
 
-  triggerDownload(canvas, `${userName.replace(/\s+/g, '-')}-spotify-stats.png`);
+    // 3. Draw Groove Lines
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
+    ctx.lineWidth = 1;
+    [115, 100, 85, 70].forEach(r => {
+      ctx.beginPath();
+      ctx.arc(x, recordY, r, 0, Math.PI * 2);
+      ctx.stroke();
+    });
+
+    // 4. Draw Center Image
+    const img = loadedImages[idx];
+    if (img) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(x, recordY, 45, 0, Math.PI * 2);
+      ctx.clip();
+      ctx.drawImage(img, x - 45, recordY - 45, 90, 90);
+      ctx.restore();
+    }
+
+    // 5. Center Spindle Hole
+    ctx.fillStyle = '#0a0518';
+    ctx.strokeStyle = '#222222';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(x, recordY, 8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // 6. Placements metadata below the vinyl
+    // Song Title
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '800 24px system-ui';
+    ctx.textAlign = 'center';
+    ctx.fillText(credit.title.toUpperCase(), x, recordY + 180);
+
+    // Artist
+    ctx.fillStyle = '#ec4899';
+    ctx.font = 'bold 16px system-ui';
+    ctx.fillText(credit.artist.toUpperCase(), x, recordY + 215);
+
+    // Role pill border and text
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.03)';
+    ctx.strokeStyle = 'rgba(168, 85, 247, 0.2)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(x - 90, recordY + 240, 180, 36, 18);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = '#a855f7';
+    ctx.font = '800 12px system-ui';
+    ctx.fillText(credit.role.toUpperCase(), x, recordY + 262);
+  });
+
+  triggerDownload(canvas, `${userName.replace(/\s+/g, '-')}-spotlight.png`);
 };

@@ -85,6 +85,7 @@ export interface UserProfile {
   linkedAccounts?: LinkedAccount[];
   verifiedBadges?: string[];
   plan?: 'free' | 'pro';
+  deleted?: boolean;
 }
 
 export interface MatcherProfile extends UserProfile {
